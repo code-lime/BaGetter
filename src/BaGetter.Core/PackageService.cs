@@ -13,17 +13,20 @@ public class PackageService : IPackageService
     private readonly IPackageDatabase _db;
     private readonly IUpstreamClient _upstream;
     private readonly IPackageIndexingService _indexer;
+    private readonly IEnumerable<IPackageStorageSynchronizer> _storageSynchronizers;
     private readonly ILogger<PackageService> _logger;
 
     public PackageService(
         IPackageDatabase db,
         IUpstreamClient upstream,
         IPackageIndexingService indexer,
+        IEnumerable<IPackageStorageSynchronizer> storageSynchronizers,
         ILogger<PackageService> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _upstream = upstream ?? throw new ArgumentNullException(nameof(upstream));
         _indexer = indexer ?? throw new ArgumentNullException(nameof(indexer));
+        _storageSynchronizers = storageSynchronizers ?? throw new ArgumentNullException(nameof(storageSynchronizers));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -98,6 +101,38 @@ public class PackageService : IPackageService
         if (await _db.ExistsAsync(id, version, cancellationToken))
         {
             return true;
+        }
+
+        foreach (var storageSynchronizer in _storageSynchronizers)
+        {
+            _logger.LogInformation(
+                "Package {PackageId} {PackageVersion} does not exist locally. Checking storage synchronizer {Synchronizer}...",
+                id,
+                version,
+                storageSynchronizer.GetType().Name);
+
+            try
+            {
+                if (await storageSynchronizer.TrySyncPackageAsync(id, version, cancellationToken))
+                {
+                    _logger.LogInformation(
+                        "Finished indexing package {PackageId} {PackageVersion} from storage synchronizer {Synchronizer}",
+                        id,
+                        version,
+                        storageSynchronizer.GetType().Name);
+
+                    return true;
+                }
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(
+                    e,
+                    "Failed to index package {PackageId} {PackageVersion} from storage synchronizer {Synchronizer}",
+                    id,
+                    version,
+                    storageSynchronizer.GetType().Name);
+            }
         }
 
         var cacheFeedUrl = _upstream.GetServiceIndexUrl();

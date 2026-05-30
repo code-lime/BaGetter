@@ -378,6 +378,7 @@ public class PackageServiceTests
                 _db.Object,
                 _upstream.Object,
                 _indexer.Object,
+                Array.Empty<IPackageStorageSynchronizer>(),
                 Mock.Of<ILogger<PackageService>>());
         }
     }
