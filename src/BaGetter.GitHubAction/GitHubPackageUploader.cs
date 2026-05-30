@@ -7,15 +7,30 @@ internal static class GitHubPackageUploader
 
     public static async Task UploadAsync(ActionInputs inputs, CancellationToken cancellationToken)
     {
-        if (!File.Exists(inputs.PackageFile))
+        var packageFiles = ResolvePackageFiles(inputs.PackageFile).ToList();
+        if (packageFiles.Count == 0)
         {
-            throw new FileNotFoundException("Package file was not found", inputs.PackageFile);
+            throw new FileNotFoundException("No uploadable .nupkg files were found", inputs.PackageFile);
         }
 
-        var packageBytes = await File.ReadAllBytesAsync(inputs.PackageFile, cancellationToken);
+        var client = CreateClient(inputs);
+
+        foreach (var packageFile in packageFiles)
+        {
+            await UploadPackageAsync(client, inputs, packageFile, cancellationToken);
+        }
+    }
+
+    private static async Task UploadPackageAsync(
+        GitHubClient client,
+        ActionInputs inputs,
+        string packageFile,
+        CancellationToken cancellationToken)
+    {
+        var packageBytes = await File.ReadAllBytesAsync(packageFile, cancellationToken);
         if (packageBytes.Length > MaxGitHubFileSize)
         {
-            throw new InvalidOperationException("GitHub repository contents API does not support files over 100 MiB");
+            throw new InvalidOperationException($"GitHub repository contents API does not support files over 100 MiB: {packageFile}");
         }
 
         await using var packageStream = new MemoryStream(packageBytes, writable: false);
@@ -27,7 +42,6 @@ internal static class GitHubPackageUploader
         var packagePath = BuildPackagePath(inputs.RootPath, packageId, packageVersion);
         var content = Convert.ToBase64String(packageBytes);
 
-        var client = CreateClient(inputs);
         var existingContent = await GetExistingContentOrNullAsync(client, inputs, packagePath);
         var message = $"{inputs.CommitMessagePrefix}: upload {packageId} {packageVersion}";
 
@@ -38,7 +52,7 @@ internal static class GitHubPackageUploader
                 : new CreateFileRequest(message, content, inputs.Branch, convertContentToBase64: false);
 
             await client.Repository.Content.CreateFile(inputs.Owner, inputs.Repository, packagePath, request);
-            Console.WriteLine($"Uploaded {inputs.PackageFile} to {packagePath}");
+            Console.WriteLine($"Uploaded {packageFile} to {packagePath}");
             return;
         }
 
@@ -53,7 +67,54 @@ internal static class GitHubPackageUploader
             : new UpdateFileRequest(message, content, existingContent.Sha, inputs.Branch, convertContentToBase64: false);
 
         await client.Repository.Content.UpdateFile(inputs.Owner, inputs.Repository, packagePath, updateRequest);
-        Console.WriteLine($"Updated {inputs.PackageFile} at {packagePath}");
+        Console.WriteLine($"Updated {packageFile} at {packagePath}");
+    }
+
+    private static IEnumerable<string> ResolvePackageFiles(string path)
+    {
+        if (File.Exists(path))
+        {
+            return IsUploadablePackage(path) ? [path] : [];
+        }
+
+        if (Directory.Exists(path))
+        {
+            return Directory
+                .EnumerateFiles(path, "*.nupkg", SearchOption.TopDirectoryOnly)
+                .Where(IsUploadablePackage)
+                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase);
+        }
+
+        if (path.Contains('*') || path.Contains('?'))
+        {
+            var directory = Path.GetDirectoryName(path);
+            var pattern = Path.GetFileName(path);
+
+            if (string.IsNullOrEmpty(directory))
+            {
+                directory = Directory.GetCurrentDirectory();
+            }
+
+            if (string.IsNullOrEmpty(pattern) || !Directory.Exists(directory))
+            {
+                return [];
+            }
+
+            return Directory
+                .EnumerateFiles(directory, pattern, SearchOption.TopDirectoryOnly)
+                .Where(IsUploadablePackage)
+                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase);
+        }
+
+        return [];
+    }
+
+    private static bool IsUploadablePackage(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        return fileName.EndsWith(".nupkg", StringComparison.OrdinalIgnoreCase) &&
+            !fileName.EndsWith(".symbols.nupkg", StringComparison.OrdinalIgnoreCase) &&
+            !fileName.EndsWith(".snupkg", StringComparison.OrdinalIgnoreCase);
     }
 
     private static GitHubClient CreateClient(ActionInputs inputs)

@@ -5,7 +5,7 @@ branding:
   color: blue
 inputs:
   package-file:
-    description: 'Path to the .nupkg file to upload'
+    description: 'Path, directory, or glob pattern for .nupkg files to upload. Symbol packages are ignored'
     required: true
   owner:
     description: 'GitHub repository owner'

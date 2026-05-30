@@ -2,7 +2,7 @@ using CommandLine;
 
 internal sealed class ActionInputs
 {
-    [Option("package-file", Required = true, HelpText = "Path to the .nupkg file to upload")]
+    [Option("package-file", Required = true, HelpText = "Path, directory, or glob pattern for .nupkg files to upload")]
     public required string PackageFile { get; init; }
 
     [Option("owner", Required = true, HelpText = "GitHub repository owner")]
