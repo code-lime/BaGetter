@@ -1,0 +1,56 @@
+name: 'BaGetter Package Upload'
+description: 'Upload a NuGet package into a GitHub-backed BaGetter storage repository'
+branding:
+  icon: upload-cloud
+  color: blue
+inputs:
+  package-file:
+    description: 'Path to the .nupkg file to upload'
+    required: true
+  owner:
+    description: 'GitHub repository owner'
+    required: true
+  repository:
+    description: 'GitHub repository name'
+    required: true
+  token:
+    description: 'GitHub token with repository contents write access'
+    required: true
+  branch:
+    description: 'Target branch. Empty means the repository default branch'
+    required: false
+    default: ''
+  root-path:
+    description: 'Optional BaGetter storage root path inside the repository'
+    required: false
+    default: ''
+  api-base-url:
+    description: 'GitHub API base URL'
+    required: false
+    default: 'https://api.github.com'
+  commit-message-prefix:
+    description: 'Commit message prefix'
+    required: false
+    default: 'BaGetter package upload'
+  overwrite:
+    description: 'Replace an existing package file'
+    required: false
+    default: 'false'
+runs:
+  using: 'composite'
+  steps:
+  - uses: actions/setup-dotnet@v4
+    with:
+      dotnet-version: '9.0.x'
+  - shell: bash
+    run: |
+      dotnet run --project "$GITHUB_ACTION_PATH/src/BaGetter.GitHubAction/BaGetter.GitHubAction.csproj" -- \
+        --package-file "${{ inputs.package-file }}" \
+        --owner "${{ inputs.owner }}" \
+        --repository "${{ inputs.repository }}" \
+        --token "${{ inputs.token }}" \
+        --branch "${{ inputs.branch }}" \
+        --root-path "${{ inputs.root-path }}" \
+        --api-base-url "${{ inputs.api-base-url }}" \
+        --commit-message-prefix "${{ inputs.commit-message-prefix }}" \
+        --overwrite "${{ inputs.overwrite }}"
