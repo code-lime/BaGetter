@@ -59,14 +59,14 @@ runs:
       IMAGE_NAME="${{ inputs.image-name }}"
       CONTAINER_NAME="${{ inputs.container-name }}"
       PORT="${{ inputs.port }}"
-      SOURCE_URL="http://127.0.0.1:${PORT}/v3/index.json"
+      SOURCE_URL="http://localhost:${PORT}/v3/index.json"
 
       docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1 || true
       docker build -t "$IMAGE_NAME" -f "$GITHUB_ACTION_PATH/Dockerfile" "$GITHUB_ACTION_PATH"
 
       docker run -d \
         --name "$CONTAINER_NAME" \
-        -p "127.0.0.1:${PORT}:8080" \
+        -p "${PORT}:8080" \
         -e "ApiKey=${{ inputs.api-key }}" \
         -e "Database__Type=Sqlite" \
         -e "Database__ConnectionString=Data Source=/data/db/bagetter.db" \
