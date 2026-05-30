@@ -68,6 +68,7 @@ public class Program
 
                 // Optionally load secrets from files in the conventional path
                 config.AddKeyPerFile("/run/secrets", optional: true);
+                config.AddEnvironmentVariablePlaceholders();
             })
             .ConfigureWebHostDefaults(web =>
             {
