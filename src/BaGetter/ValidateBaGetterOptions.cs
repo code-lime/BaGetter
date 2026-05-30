@@ -33,6 +33,7 @@ public class ValidateBaGetterOptions
             "AwsS3",
             "AzureBlobStorage",
             "Filesystem",
+            "GitHub",
             "GoogleCloud",
             "TencentCos",
             "Null"

@@ -49,6 +49,7 @@ public class StatisticsService : IStatisticsService
         if (configuration.HasStorageType("FileSystem")) servicesNames.Add("FileSystem");
         if (configuration.HasStorageType("AwsS3")) servicesNames.Add("AwsS3");
         if (configuration.HasStorageType("AliyunOss")) servicesNames.Add("AliyunOss");
+        if (configuration.HasStorageType("GitHub")) servicesNames.Add("GitHub");
         if (configuration.HasStorageType("GoogleCloud")) servicesNames.Add("GoogleCloud");
         if (configuration.HasStorageType("TencentCos")) servicesNames.Add("TencentCos");
         return servicesNames;
