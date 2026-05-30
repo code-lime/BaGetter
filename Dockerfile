@@ -53,7 +53,5 @@ COPY --from=publish /data /data
 # copy the published app
 WORKDIR /app
 COPY --from=publish /app .
-COPY .github/actions/bagetter-server/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["dotnet", "BaGetter.dll"]

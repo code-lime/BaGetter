@@ -1,12 +1,13 @@
 name: 'BaGetter NuGet Server'
-description: 'Run BaGetter in a Docker action and push NuGet packages through the server'
+description: 'Start a detached BaGetter NuGet server backed by GitHub storage'
 branding:
   icon: package
   color: blue
 inputs:
-  package-path:
-    description: 'Path, directory, or glob pattern for .nupkg files to push. Symbol packages are ignored'
-    required: true
+  port:
+    description: 'Host port for BaGetter'
+    required: false
+    default: '5050'
   api-key:
     description: 'BaGetter API key used for package pushes'
     required: false
@@ -32,16 +33,71 @@ inputs:
     description: 'GitHub API base URL'
     required: false
     default: 'https://api.github.com'
+  image-name:
+    description: 'Docker image name to build'
+    required: false
+    default: 'bagetter-action'
+  container-name:
+    description: 'Docker container name'
+    required: false
+    default: 'bagetter-action'
+outputs:
+  source-url:
+    description: 'NuGet V3 source URL'
+    value: ${{ steps.start.outputs.source-url }}
+  api-key:
+    description: 'BaGetter API key'
+    value: ${{ steps.start.outputs.api-key }}
 runs:
-  using: 'docker'
-  image: 'Dockerfile'
-  entrypoint: '/entrypoint.sh'
-  args:
-  - ${{ inputs.package-path }}
-  - ${{ inputs.api-key }}
-  - ${{ inputs.owner }}
-  - ${{ inputs.repository }}
-  - ${{ inputs.token }}
-  - ${{ inputs.branch }}
-  - ${{ inputs.root-path }}
-  - ${{ inputs.api-base-url }}
+  using: 'composite'
+  steps:
+  - id: start
+    shell: bash
+    run: |
+      set -euo pipefail
+
+      IMAGE_NAME="${{ inputs.image-name }}"
+      CONTAINER_NAME="${{ inputs.container-name }}"
+      PORT="${{ inputs.port }}"
+      SOURCE_URL="http://127.0.0.1:${PORT}/v3/index.json"
+
+      docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1 || true
+      docker build -t "$IMAGE_NAME" -f "$GITHUB_ACTION_PATH/Dockerfile" "$GITHUB_ACTION_PATH"
+
+      docker run -d \
+        --name "$CONTAINER_NAME" \
+        -p "127.0.0.1:${PORT}:8080" \
+        -e "ApiKey=${{ inputs.api-key }}" \
+        -e "Database__Type=Sqlite" \
+        -e "Database__ConnectionString=Data Source=/data/db/bagetter.db" \
+        -e "Search__Type=Database" \
+        -e "Storage__Type=GitHub" \
+        -e "Storage__Owner=${{ inputs.owner }}" \
+        -e "Storage__Repository=${{ inputs.repository }}" \
+        -e "Storage__Token=${{ inputs.token }}" \
+        -e "Storage__Branch=${{ inputs.branch }}" \
+        -e "Storage__RootPath=${{ inputs.root-path }}" \
+        -e "Storage__ApiBaseUrl=${{ inputs.api-base-url }}" \
+        "$IMAGE_NAME" \
+        --urls "http://0.0.0.0:8080"
+
+      for attempt in $(seq 1 60); do
+        if curl -fsS "$SOURCE_URL" > /dev/null 2>&1; then
+          echo "source-url=$SOURCE_URL" >> "$GITHUB_OUTPUT"
+          echo "api-key=${{ inputs.api-key }}" >> "$GITHUB_OUTPUT"
+          echo "BaGetter is ready at $SOURCE_URL"
+          exit 0
+        fi
+
+        if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2> /dev/null || echo false)" != "true" ]; then
+          echo "BaGetter container exited before becoming ready"
+          docker logs "$CONTAINER_NAME" || true
+          exit 1
+        fi
+
+        sleep 1
+      done
+
+      echo "BaGetter did not become ready in time"
+      docker logs "$CONTAINER_NAME" || true
+      exit 1
