@@ -1,13 +1,12 @@
 name: 'BaGetter NuGet Server'
-description: 'Start a BaGetter NuGet server backed by GitHub storage and stop it automatically in post action cleanup'
+description: 'Run BaGetter in a Docker action and push NuGet packages through the server'
 branding:
   icon: package
   color: blue
 inputs:
-  url:
-    description: 'BaGetter server URL'
-    required: false
-    default: 'http://127.0.0.1:5050'
+  package-path:
+    description: 'Path, directory, or glob pattern for .nupkg files to push. Symbol packages are ignored'
+    required: true
   api-key:
     description: 'BaGetter API key used for package pushes'
     required: false
@@ -33,16 +32,16 @@ inputs:
     description: 'GitHub API base URL'
     required: false
     default: 'https://api.github.com'
-  database-path:
-    description: 'SQLite database path. Empty uses RUNNER_TEMP'
-    required: false
-    default: ''
-outputs:
-  source-url:
-    description: 'NuGet V3 source URL'
-  api-key:
-    description: 'BaGetter API key'
 runs:
-  using: 'node20'
-  main: '.github/actions/bagetter-server/index.js'
-  post: '.github/actions/bagetter-server/post.js'
+  using: 'docker'
+  image: 'Dockerfile'
+  entrypoint: '/entrypoint.sh'
+  args:
+  - ${{ inputs.package-path }}
+  - ${{ inputs.api-key }}
+  - ${{ inputs.owner }}
+  - ${{ inputs.repository }}
+  - ${{ inputs.token }}
+  - ${{ inputs.branch }}
+  - ${{ inputs.root-path }}
+  - ${{ inputs.api-base-url }}

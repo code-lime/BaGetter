@@ -39,7 +39,7 @@ RUN mkdir -p "/data/packages" \
 ## Create final image
 FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine AS base
 # install cultures (same approach as Alpine SDK image)
-RUN apk add --no-cache icu-libs icu-data-full tzdata
+RUN apk add --no-cache bash curl icu-libs icu-data-full tzdata
 # disable the invariant mode (set in base image)
 ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
 # set default configurations; use the `/data` folder for packages, symbols and the SQLite database
@@ -53,5 +53,7 @@ COPY --from=publish /data /data
 # copy the published app
 WORKDIR /app
 COPY --from=publish /app .
+COPY .github/actions/bagetter-server/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["dotnet", "BaGetter.dll"]
