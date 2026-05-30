@@ -4,10 +4,6 @@ branding:
   icon: package
   color: blue
 inputs:
-  port:
-    description: 'Host port for BaGetter'
-    required: false
-    default: '5050'
   api-key:
     description: 'BaGetter API key used for package pushes'
     required: false
@@ -41,6 +37,10 @@ inputs:
     description: 'Docker container name'
     required: false
     default: 'bagetter-action'
+  network-name:
+    description: 'Docker network used to connect the runner container to BaGetter'
+    required: false
+    default: 'bagetter-action'
 outputs:
   source-url:
     description: 'NuGet V3 source URL'
@@ -58,15 +58,19 @@ runs:
 
       IMAGE_NAME="${{ inputs.image-name }}"
       CONTAINER_NAME="${{ inputs.container-name }}"
-      PORT="${{ inputs.port }}"
-      SOURCE_URL="http://localhost:${PORT}/v3/index.json"
+      NETWORK_NAME="${{ inputs.network-name }}"
+      RUNNER_CONTAINER="$(hostname)"
+      SOURCE_URL="http://${CONTAINER_NAME}:8080/v3/index.json"
 
       docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1 || true
+      docker network create "$NETWORK_NAME" > /dev/null 2>&1 || true
+      docker network connect "$NETWORK_NAME" "$RUNNER_CONTAINER" > /dev/null 2>&1 || true
+
       docker build -t "$IMAGE_NAME" -f "$GITHUB_ACTION_PATH/Dockerfile" "$GITHUB_ACTION_PATH"
 
       docker run -d \
         --name "$CONTAINER_NAME" \
-        -p "${PORT}:8080" \
+        --network "$NETWORK_NAME" \
         -e "ApiKey=${{ inputs.api-key }}" \
         -e "Database__Type=Sqlite" \
         -e "Database__ConnectionString=Data Source=/data/db/bagetter.db" \
@@ -91,6 +95,8 @@ runs:
 
         if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2> /dev/null || echo false)" != "true" ]; then
           echo "BaGetter container exited before becoming ready"
+          docker ps || true
+          docker network inspect "$NETWORK_NAME" || true
           docker logs "$CONTAINER_NAME" || true
           exit 1
         fi
@@ -99,5 +105,7 @@ runs:
       done
 
       echo "BaGetter did not become ready in time"
+      docker ps || true
+      docker network inspect "$NETWORK_NAME" || true
       docker logs "$CONTAINER_NAME" || true
       exit 1
