@@ -34,6 +34,8 @@ public class PackageService : IPackageService
         string id,
         CancellationToken cancellationToken)
     {
+        await SyncPackageListAsync(id, cancellationToken);
+
         var upstreamVersions = await _upstream.ListPackageVersionsAsync(id, cancellationToken);
 
         // Merge the local package versions into the upstream package versions.
@@ -48,7 +50,10 @@ public class PackageService : IPackageService
 
     public async Task<IReadOnlyList<Package>> FindPackagesAsync(string id, CancellationToken cancellationToken)
     {
+        await SyncPackageListAsync(id, cancellationToken);
+
         var upstreamPackages = await _upstream.ListPackagesAsync(id, cancellationToken);
+
         var localPackages = await _db.FindAsync(id, includeUnlisted: true, cancellationToken);
 
         if (!upstreamPackages.Any()) return localPackages;
@@ -98,6 +103,8 @@ public class PackageService : IPackageService
     /// <returns>True if the package exists locally or was indexed from an upstream source.</returns>
     private async Task<bool> MirrorAsync(string id, NuGetVersion version, CancellationToken cancellationToken)
     {
+        await SyncAsync(cancellationToken);
+
         if (await _db.ExistsAsync(id, version, cancellationToken))
         {
             return true;
@@ -179,6 +186,43 @@ public class PackageService : IPackageService
                 version);
 
             return false;
+        }
+    }
+
+    private async Task SyncAsync(CancellationToken cancellationToken)
+    {
+        foreach (var storageSynchronizer in _storageSynchronizers)
+        {
+            try
+            {
+                await storageSynchronizer.TrySyncAsync(cancellationToken);
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(
+                    e,
+                    "Failed to refresh packages from storage synchronizer {Synchronizer}",
+                    storageSynchronizer.GetType().Name);
+            }
+        }
+    }
+
+    private async Task SyncPackageListAsync(string id, CancellationToken cancellationToken)
+    {
+        foreach (var storageSynchronizer in _storageSynchronizers)
+        {
+            try
+            {
+                await storageSynchronizer.TrySyncPackageListAsync(id, cancellationToken);
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(
+                    e,
+                    "Failed to refresh package list {PackageId} from storage synchronizer {Synchronizer}",
+                    id,
+                    storageSynchronizer.GetType().Name);
+            }
         }
     }
 }

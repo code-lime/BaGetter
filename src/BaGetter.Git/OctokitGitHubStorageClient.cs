@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading;
@@ -28,6 +29,35 @@ public class OctokitGitHubStorageClient : IGitHubStorageClient
         {
             _client.Credentials = new Credentials(_options.Token);
         }
+    }
+
+    public async Task<string> GetLatestCommitShaAsync(
+        string branch,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var resolvedBranch = await ResolveBranchAsync(branch);
+        var branchInfo = await _client.Repository.Branch.Get(_options.Owner, _options.Repository, resolvedBranch);
+
+        return branchInfo.Commit.Sha;
+    }
+
+    public async Task<IReadOnlyList<string>> GetRepositoryFilesAsync(
+        string branch,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var resolvedBranch = await ResolveBranchAsync(branch);
+        var branchInfo = await _client.Repository.Branch.Get(_options.Owner, _options.Repository, resolvedBranch);
+        var tree = await _client.Git.Tree.GetRecursive(_options.Owner, _options.Repository, branchInfo.Commit.Sha);
+
+        return tree
+            .Tree
+            .Where(item => item.Type == TreeType.Blob)
+            .Select(item => item.Path)
+            .ToList();
     }
 
     public async Task<GitHubStorageContent> GetFileAsync(
@@ -80,5 +110,16 @@ public class OctokitGitHubStorageClient : IGitHubStorageClient
             : new DeleteFileRequest(message, sha, branch);
 
         return _client.Repository.Content.DeleteFile(_options.Owner, _options.Repository, path, request);
+    }
+
+    private async Task<string> ResolveBranchAsync(string branch)
+    {
+        if (!string.IsNullOrWhiteSpace(branch))
+        {
+            return branch;
+        }
+
+        var repository = await _client.Repository.Get(_options.Owner, _options.Repository);
+        return repository.DefaultBranch;
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Threading;
@@ -242,6 +243,20 @@ public class GitRepositoryServiceTests
         public string DeletedSha { get; private set; }
 
         public string DeletedBranch { get; private set; }
+
+        public Task<string> GetLatestCommitShaAsync(
+            string branch,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult("sha");
+        }
+
+        public Task<IReadOnlyList<string>> GetRepositoryFilesAsync(
+            string branch,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult((IReadOnlyList<string>)Files.Keys.ToList());
+        }
 
         public Task<GitHubStorageContent> GetFileAsync(
             string path,
