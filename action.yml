@@ -1,23 +1,28 @@
-name: 'BaGetter Package Upload'
-description: 'Upload a NuGet package into a GitHub-backed BaGetter storage repository'
+name: 'BaGetter NuGet Server'
+description: 'Start a BaGetter NuGet server backed by GitHub storage and stop it automatically in post action cleanup'
 branding:
-  icon: upload-cloud
+  icon: package
   color: blue
 inputs:
-  package-file:
-    description: 'Path, directory, or glob pattern for .nupkg files to upload. Symbol packages are ignored'
-    required: true
+  url:
+    description: 'BaGetter server URL'
+    required: false
+    default: 'http://127.0.0.1:5050'
+  api-key:
+    description: 'BaGetter API key used for package pushes'
+    required: false
+    default: 'github-actions'
   owner:
-    description: 'GitHub repository owner'
+    description: 'GitHub storage repository owner'
     required: true
   repository:
-    description: 'GitHub repository name'
+    description: 'GitHub storage repository name'
     required: true
   token:
     description: 'GitHub token with repository contents write access'
     required: true
   branch:
-    description: 'Target branch. Empty means the repository default branch'
+    description: 'GitHub storage branch. Empty means the repository default branch'
     required: false
     default: ''
   root-path:
@@ -28,29 +33,16 @@ inputs:
     description: 'GitHub API base URL'
     required: false
     default: 'https://api.github.com'
-  commit-message-prefix:
-    description: 'Commit message prefix'
+  database-path:
+    description: 'SQLite database path. Empty uses RUNNER_TEMP'
     required: false
-    default: 'BaGetter package upload'
-  overwrite:
-    description: 'Replace an existing package file'
-    required: false
-    default: 'false'
+    default: ''
+outputs:
+  source-url:
+    description: 'NuGet V3 source URL'
+  api-key:
+    description: 'BaGetter API key'
 runs:
-  using: 'composite'
-  steps:
-  - uses: actions/setup-dotnet@v4
-    with:
-      dotnet-version: '9.0.x'
-  - shell: bash
-    run: |
-      dotnet run --project "$GITHUB_ACTION_PATH/src/BaGetter.GitHubAction/BaGetter.GitHubAction.csproj" -- \
-        --package-file "${{ inputs.package-file }}" \
-        --owner "${{ inputs.owner }}" \
-        --repository "${{ inputs.repository }}" \
-        --token "${{ inputs.token }}" \
-        --branch "${{ inputs.branch }}" \
-        --root-path "${{ inputs.root-path }}" \
-        --api-base-url "${{ inputs.api-base-url }}" \
-        --commit-message-prefix "${{ inputs.commit-message-prefix }}" \
-        --overwrite "${{ inputs.overwrite }}"
+  using: 'node20'
+  main: '.github/actions/bagetter-server/index.js'
+  post: '.github/actions/bagetter-server/post.js'
