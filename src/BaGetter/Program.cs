@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
 using BaGetter.Core;
 using BaGetter.Web;
@@ -7,6 +8,9 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.EventLog;
+using Serilog;
 
 namespace BaGetter;
 
@@ -14,7 +18,10 @@ public class Program
 {
     public static async Task Main(string[] args)
     {
-        var host = CreateHostBuilder(args).Build();
+        using var host = CreateHostBuilder(args).Build();
+        var logger = host.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogInformation("BaGetter host started from {BaseDirectory}", AppContext.BaseDirectory);
+
         if (!host.ValidateStartupOptions())
         {
             return;
@@ -57,6 +64,7 @@ public class Program
     {
         return Host
             .CreateDefaultBuilder(args)
+            .UseContentRoot(AppContext.BaseDirectory)
             .ConfigureAppConfiguration((ctx, config) =>
             {
                 var root = Environment.GetEnvironmentVariable("BAGET_CONFIG_ROOT");
@@ -70,12 +78,46 @@ public class Program
                 config.AddKeyPerFile("/run/secrets", optional: true);
                 config.AddEnvironmentVariablePlaceholders();
             })
+            .ConfigureLogging((context, logging) =>
+            {
+                // A desktop process normally cannot create Event Log sources without elevation.
+                if (OperatingSystem.IsWindows())
+                {
+                    logging.AddFilter<EventLogLoggerProvider>(_ => false);
+                }
+
+                var logPath = context.Configuration["Logging:File:Path"];
+                if (string.IsNullOrWhiteSpace(logPath))
+                {
+                    logPath = "logs/bagetter.log";
+                }
+
+                if (!Path.IsPathFullyQualified(logPath))
+                {
+                    logPath = Path.GetFullPath(logPath, AppContext.BaseDirectory);
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+
+                var fileLogger = new LoggerConfiguration()
+                    .MinimumLevel.Verbose()
+                    .Enrich.FromLogContext()
+                    .WriteTo.File(
+                        logPath,
+                        rollingInterval: RollingInterval.Day,
+                        retainedFileCountLimit: 3,
+                        shared: true,
+                        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}")
+                    .CreateLogger();
+
+                logging.AddSerilog(fileLogger, dispose: true);
+            })
             .ConfigureWebHostDefaults(web =>
             {
                 web.ConfigureKestrel(options =>
                 {
                     // Remove the upload limit from Kestrel. If needed, an upload limit can
-                    // be enforced by a reverse proxy server, like IIS.
+                    // be enforced by a reverse proxy server.
                     options.Limits.MaxRequestBodySize = null;
                 });
 

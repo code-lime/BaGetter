@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -9,6 +10,7 @@ using BaGetter.Core;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using NuGet.Packaging;
 using NuGet.Versioning;
 
 namespace BaGetter.Git;
@@ -18,19 +20,21 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
     private const string PackagesPathPrefix = "packages";
     private static readonly ConcurrentDictionary<string, RepositorySyncState> SyncStates = new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly IGitHubStorageClient _client;
+    private readonly IGitRepositoryClient _client;
     private readonly IStorageService _storage;
     private readonly IPackageDatabase _db;
-    private readonly IPackageIndexingService _indexer;
+    private readonly ISearchIndexer _search;
+    private readonly SystemTime _time;
     private readonly IConfiguration _configuration;
     private readonly IOptionsSnapshot<GitRepositoryOptions> _options;
     private readonly ILogger<GitRepositoryPackageSynchronizer> _logger;
 
     public GitRepositoryPackageSynchronizer(
-        IGitHubStorageClient client,
+        IGitRepositoryClient client,
         IStorageService storage,
         IPackageDatabase db,
-        IPackageIndexingService indexer,
+        ISearchIndexer search,
+        SystemTime time,
         IConfiguration configuration,
         IOptionsSnapshot<GitRepositoryOptions> options,
         ILogger<GitRepositoryPackageSynchronizer> logger)
@@ -38,7 +42,8 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _storage = storage ?? throw new ArgumentNullException(nameof(storage));
         _db = db ?? throw new ArgumentNullException(nameof(db));
-        _indexer = indexer ?? throw new ArgumentNullException(nameof(indexer));
+        _search = search ?? throw new ArgumentNullException(nameof(search));
+        _time = time ?? throw new ArgumentNullException(nameof(time));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -53,7 +58,7 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
 
         try
         {
-            await EnsureRepositoryIsCurrentAsync(cancellationToken);
+            await EnsureRepositoryIsCurrentAsync(indexAllPackages: true, cancellationToken);
             return true;
         }
         catch (Exception e)
@@ -74,8 +79,14 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
 
         try
         {
-            var state = await EnsureRepositoryIsCurrentAsync(cancellationToken);
+            var state = await EnsureRepositoryIsCurrentAsync(indexAllPackages: false, cancellationToken);
             await RemoveMissingVersionsAsync(id, state, cancellationToken);
+
+            await IndexPackageFilesAsync(
+                state.PackageFiles.Values.Where(
+                    package => string.Equals(package.Id, id, StringComparison.OrdinalIgnoreCase)),
+                $"package {id}",
+                cancellationToken);
 
             return true;
         }
@@ -96,7 +107,7 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
             return false;
         }
 
-        await EnsureRepositoryIsCurrentAsync(cancellationToken);
+        await EnsureRepositoryIsCurrentAsync(indexAllPackages: false, cancellationToken);
 
         var packagePath = PackagePath(id, version);
 
@@ -125,50 +136,59 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
         }
     }
 
-    private async Task<RepositorySyncState> EnsureRepositoryIsCurrentAsync(CancellationToken cancellationToken)
+    private async Task<RepositorySyncState> EnsureRepositoryIsCurrentAsync(
+        bool indexAllPackages,
+        CancellationToken cancellationToken)
     {
         var options = _options.Value;
         var state = SyncStates.GetOrAdd(BuildStateKey(options), _ => new RepositorySyncState());
-        var latestCommitSha = await _client.GetLatestCommitShaAsync(options.Branch, cancellationToken);
-
-        if (string.Equals(state.LastCommitSha, latestCommitSha, StringComparison.OrdinalIgnoreCase))
-        {
-            return state;
-        }
-
         await state.Lock.WaitAsync(cancellationToken);
         try
         {
-            latestCommitSha = await _client.GetLatestCommitShaAsync(options.Branch, cancellationToken);
-            if (string.Equals(state.LastCommitSha, latestCommitSha, StringComparison.OrdinalIgnoreCase))
+            var now = DateTimeOffset.UtcNow;
+            if (state.LastCommitSha == null || now >= state.NextRemoteCheckUtc)
             {
-                return state;
+                var latestCommitSha = await _client.UpdateAsync(cancellationToken);
+                state.NextRemoteCheckUtc = now.AddSeconds(Math.Max(1, options.UpdateIntervalSeconds));
+                if (!string.Equals(state.LastCommitSha, latestCommitSha, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation(
+                        "GitHub repository commit changed from {PreviousCommitSha} to {LatestCommitSha}. Refreshing package file index...",
+                        state.LastCommitSha ?? "<none>",
+                        latestCommitSha);
+
+                    var packageFiles = await GetPackageFilesAsync(options, cancellationToken);
+                    foreach (var removedPackage in state.PackageFiles.Values.Where(
+                                 package => !packageFiles.ContainsKey(package.StoragePath)))
+                    {
+                        await _db.HardDeletePackageAsync(removedPackage.Id, removedPackage.Version, cancellationToken);
+                    }
+
+                    state.PackageFiles = packageFiles;
+                    state.LastCommitSha = latestCommitSha;
+                    state.FullyIndexedCommitSha = null;
+
+                    _logger.LogInformation(
+                        "Refreshed Git repository file index at commit {CommitSha}. Found {PackageCount} package files.",
+                        state.LastCommitSha,
+                        state.PackageFiles.Count);
+                }
             }
 
-            _logger.LogInformation(
-                "GitHub repository commit changed from {PreviousCommitSha} to {LatestCommitSha}. Rebuilding package metadata...",
-                state.LastCommitSha ?? "<none>",
-                latestCommitSha);
-
-            var packageFiles = await GetPackageFilesAsync(options, cancellationToken);
-
-            foreach (var removedPackage in state.PackageFiles.Values.Where(p => !packageFiles.ContainsKey(p.StoragePath)))
+            if (indexAllPackages &&
+                !string.Equals(state.FullyIndexedCommitSha, state.LastCommitSha, StringComparison.OrdinalIgnoreCase))
             {
-                await _db.HardDeletePackageAsync(removedPackage.Id, removedPackage.Version, cancellationToken);
+                await IndexPackageFilesAsync(
+                    state.PackageFiles.Values,
+                    "all packages",
+                    cancellationToken);
+
+                state.FullyIndexedCommitSha = state.LastCommitSha;
+                _logger.LogInformation(
+                    "Finished rebuilding package metadata at commit {CommitSha}. Indexed {PackageCount} package files.",
+                    state.LastCommitSha,
+                    state.PackageFiles.Count);
             }
-
-            foreach (var packageFile in packageFiles.Values)
-            {
-                await IndexPackagePathAsync(packageFile.StoragePath, cancellationToken);
-            }
-
-            state.PackageFiles = packageFiles;
-            state.LastCommitSha = await _client.GetLatestCommitShaAsync(options.Branch, cancellationToken);
-
-            _logger.LogInformation(
-                "Finished rebuilding package metadata from GitHub repository at commit {CommitSha}. Indexed {PackageCount} package files.",
-                state.LastCommitSha,
-                state.PackageFiles.Count);
 
             return state;
         }
@@ -183,7 +203,7 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
         CancellationToken cancellationToken)
     {
         var rootPath = NormalizeRootPath(options.RootPath);
-        var repositoryFiles = await _client.GetRepositoryFilesAsync(options.Branch, cancellationToken);
+        var repositoryFiles = await _client.GetRepositoryFilesAsync(cancellationToken);
         var packageFiles = new Dictionary<string, PackageFile>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var repositoryPath in repositoryFiles)
@@ -236,8 +256,73 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
             return false;
         }
 
-        var result = await _indexer.IndexAsync(packageStream, BuildSourceUrl(_options.Value), cancellationToken);
-        return result is PackageIndexingResult.Success or PackageIndexingResult.PackageAlreadyExists;
+        using var packageReader = new PackageArchiveReader(packageStream, leaveStreamOpen: true);
+        var package = packageReader.GetPackageMetadata();
+        package.CachedFrom = BuildSourceUrl(_options.Value);
+        package.Published = _time.UtcNow;
+
+        if (await _db.ExistsAsync(package.Id, package.Version, cancellationToken))
+        {
+            return true;
+        }
+
+        var result = await _db.AddAsync(package, cancellationToken);
+        if (result == PackageAddResult.PackageAlreadyExists)
+        {
+            return true;
+        }
+
+        if (result != PackageAddResult.Success)
+        {
+            throw new InvalidOperationException($"Unknown {nameof(PackageAddResult)} value: {result}");
+        }
+
+        await _search.IndexAsync(package, cancellationToken);
+        _logger.LogDebug(
+            "Imported package {PackageId} {PackageVersion} metadata from {PackagePath}",
+            package.Id,
+            package.NormalizedVersionString,
+            packagePath);
+
+        return true;
+    }
+
+    private async Task IndexPackageFilesAsync(
+        IEnumerable<PackageFile> packageFiles,
+        string scope,
+        CancellationToken cancellationToken)
+    {
+        var files = packageFiles.ToList();
+        if (files.Count == 0)
+        {
+            _logger.LogDebug("No package files to synchronize for {SyncScope}", scope);
+            return;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        var reportEvery = Math.Max(1, (int)Math.Ceiling(files.Count * 0.05));
+        _logger.LogInformation(
+            "Starting package metadata synchronization for {SyncScope}: {TotalPackages} files",
+            scope,
+            files.Count);
+
+        for (var index = 0; index < files.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await IndexPackagePathAsync(files[index].StoragePath, cancellationToken);
+
+            var completed = index + 1;
+            if (completed == files.Count || completed % reportEvery == 0)
+            {
+                _logger.LogInformation(
+                    "Package synchronization progress for {SyncScope}: {CompletedPackages}/{TotalPackages} ({Percent}%), elapsed {Elapsed}",
+                    scope,
+                    completed,
+                    files.Count,
+                    completed * 100 / files.Count,
+                    stopwatch.Elapsed);
+            }
+        }
     }
 
     private bool IsGitHubStorage()
@@ -339,6 +424,10 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
         public readonly SemaphoreSlim Lock = new(1, 1);
 
         public string LastCommitSha { get; set; }
+
+        public DateTimeOffset NextRemoteCheckUtc { get; set; }
+
+        public string FullyIndexedCommitSha { get; set; }
 
         public IReadOnlyDictionary<string, PackageFile> PackageFiles { get; set; } =
             new Dictionary<string, PackageFile>(StringComparer.OrdinalIgnoreCase);

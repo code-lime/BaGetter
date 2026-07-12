@@ -61,6 +61,7 @@ runs:
       NETWORK_NAME="${{ inputs.network-name }}"
       RUNNER_CONTAINER="$(hostname)"
       SOURCE_URL="http://${CONTAINER_NAME}:8080/v3/index.json"
+      READINESS_URL="http://${CONTAINER_NAME}:8080/health"
 
       docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1 || true
       docker network create "$NETWORK_NAME" > /dev/null 2>&1 || true
@@ -81,16 +82,22 @@ runs:
         -e "Storage__Token=${{ inputs.token }}" \
         -e "Storage__Branch=${{ inputs.branch }}" \
         -e "Storage__RootPath=${{ inputs.root-path }}" \
+        -e "Storage__WorkPath=/data/work" \
         -e "Storage__ApiBaseUrl=${{ inputs.api-base-url }}" \
         "$IMAGE_NAME" \
         --urls "http://0.0.0.0:8080"
 
-      for attempt in $(seq 1 60); do
+      for attempt in $(seq 1 120); do
         if curl -fsS "$SOURCE_URL" > /dev/null 2>&1; then
-          echo "source-url=$SOURCE_URL" >> "$GITHUB_OUTPUT"
-          echo "api-key=${{ inputs.api-key }}" >> "$GITHUB_OUTPUT"
-          echo "BaGetter is ready at $SOURCE_URL"
-          exit 0
+          # The Git health check forces the initial clone/update before NuGet
+          # starts its own 100-second request timeout.
+          READINESS_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 180 "$READINESS_URL" || true)"
+          if [ "$READINESS_STATUS" = "200" ]; then
+            echo "source-url=$SOURCE_URL" >> "$GITHUB_OUTPUT"
+            echo "api-key=${{ inputs.api-key }}" >> "$GITHUB_OUTPUT"
+            echo "BaGetter is ready at $SOURCE_URL"
+            exit 0
+          fi
         fi
 
         if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2> /dev/null || echo false)" != "true" ]; then

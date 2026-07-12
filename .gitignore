@@ -279,3 +279,6 @@ __pycache__/
 charts/
 Chart.lock
 **/appsettings.Development.json
+
+/work/
+/logs/

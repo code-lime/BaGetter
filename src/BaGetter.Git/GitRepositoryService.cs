@@ -1,35 +1,30 @@
 using System;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using BaGetter.Core;
 using Microsoft.Extensions.Options;
-using Octokit;
 
 namespace BaGetter.Git;
 
 public class GitRepositoryService : IStorageService
 {
     private const int DefaultCopyBufferSize = 81920;
-    private const long MaxGitHubFileSize = 100L * 1024L * 1024L;
+    private const long MaxGitFileSize = 100L * 1024L * 1024L;
 
-    private readonly IGitHubStorageClient _client;
-    private readonly string _branch;
+    private readonly IGitRepositoryClient _client;
     private readonly string _rootPath;
     private readonly string _commitMessagePrefix;
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
 
     public GitRepositoryService(
         IOptionsSnapshot<GitRepositoryOptions> options,
-        IGitHubStorageClient client)
+        IGitRepositoryClient client)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(client);
 
         _client = client;
-        _branch = options.Value.Branch;
         _rootPath = NormalizeRootPath(options.Value.RootPath);
         _commitMessagePrefix = string.IsNullOrWhiteSpace(options.Value.CommitMessagePrefix)
             ? "BaGetter storage"
@@ -40,57 +35,34 @@ public class GitRepositoryService : IStorageService
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var gitHubPath = GetGitHubPath(path);
+        var repositoryPath = GetRepositoryPath(path);
 
-        await _writeLock.WaitAsync(cancellationToken);
-        try
-        {
-            var existingContent = await GetFileOrNullAsync(gitHubPath, cancellationToken);
-            if (existingContent == null)
-            {
-                return;
-            }
-
-            await _client.DeleteFileAsync(
-                gitHubPath,
-                $"{_commitMessagePrefix}: delete {gitHubPath}",
-                existingContent.Sha,
-                _branch,
-                cancellationToken);
-        }
-        catch (NotFoundException)
-        {
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
+        await _client.DeleteFileAsync(
+            repositoryPath,
+            $"{_commitMessagePrefix}: delete {repositoryPath}",
+            cancellationToken);
     }
 
     public async Task<Stream> GetAsync(string path, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var content = await GetFileOrNullAsync(GetGitHubPath(path), cancellationToken);
+        var content = await _client.GetFileAsync(GetRepositoryPath(path), cancellationToken);
         if (content == null)
         {
             return null;
         }
 
-        return new MemoryStream(DecodeContent(content));
+        return new MemoryStream(content, writable: false);
     }
 
     public async Task<Uri> GetDownloadUriAsync(string path, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var content = await GetFileOrNullAsync(GetGitHubPath(path), cancellationToken);
-        if (content == null || string.IsNullOrWhiteSpace(content.DownloadUrl))
-        {
-            return null;
-        }
-
-        return new Uri(content.DownloadUrl);
+        await Task.CompletedTask;
+        GetRepositoryPath(path);
+        return null;
     }
 
     public async Task<StoragePutResult> PutAsync(
@@ -104,63 +76,30 @@ public class GitRepositoryService : IStorageService
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (content.CanSeek && content.Length > MaxGitHubFileSize)
+        if (content.CanSeek && content.Length > MaxGitFileSize)
         {
             return StoragePutResult.Conflict;
         }
 
-        var gitHubPath = GetGitHubPath(path);
+        var repositoryPath = GetRepositoryPath(path);
         using var seekableContent = new MemoryStream();
         await content.CopyToAsync(seekableContent, DefaultCopyBufferSize, cancellationToken);
 
-        if (seekableContent.Length > MaxGitHubFileSize)
+        if (seekableContent.Length > MaxGitFileSize)
         {
             return StoragePutResult.Conflict;
         }
 
         var uploadedBytes = seekableContent.ToArray();
 
-        await _writeLock.WaitAsync(cancellationToken);
-        try
-        {
-            var existingContent = await GetFileOrNullAsync(gitHubPath, cancellationToken);
-            if (existingContent != null)
-            {
-                return uploadedBytes.SequenceEqual(DecodeContent(existingContent))
-                    ? StoragePutResult.AlreadyExists
-                    : StoragePutResult.Conflict;
-            }
-
-            await _client.CreateFileAsync(
-                gitHubPath,
-                $"{_commitMessagePrefix}: add {gitHubPath}",
-                Convert.ToBase64String(uploadedBytes),
-                _branch,
-                cancellationToken);
-
-            return StoragePutResult.Success;
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
+        return await _client.PutFileAsync(
+            repositoryPath,
+            uploadedBytes,
+            $"{_commitMessagePrefix}: add {repositoryPath}",
+            cancellationToken);
     }
 
-    private async Task<GitHubStorageContent> GetFileOrNullAsync(
-        string path,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await _client.GetFileAsync(path, _branch, cancellationToken);
-        }
-        catch (NotFoundException)
-        {
-            return null;
-        }
-    }
-
-    private string GetGitHubPath(string path)
+    private string GetRepositoryPath(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -202,17 +141,4 @@ public class GitRepositoryService : IStorageService
         return normalizedPath;
     }
 
-    private static byte[] DecodeContent(GitHubStorageContent content)
-    {
-        if (!string.Equals(content.Encoding, "base64", StringComparison.OrdinalIgnoreCase))
-        {
-            return Encoding.UTF8.GetBytes(content.Content ?? string.Empty);
-        }
-
-        var encodedContent = new string((content.Content ?? string.Empty)
-            .Where(c => !char.IsWhiteSpace(c))
-            .ToArray());
-
-        return Convert.FromBase64String(encodedContent);
-    }
 }

@@ -11,7 +11,9 @@ public static class GitRepositoryApplicationExtensions
     public static BaGetterApplication AddGitRepository(this BaGetterApplication app)
     {
         app.Services.AddBaGetterOptions<GitRepositoryOptions>(nameof(BaGetterOptions.Storage));
-        app.Services.AddTransient<IGitHubStorageClient, OctokitGitHubStorageClient>();
+        app.Services.AddSingleton<IGitRepositoryClient, LibGit2SharpRepositoryClient>();
+        app.Services.AddHealthChecks()
+            .AddCheck<GitRepositoryHealthCheck>("GitHub", tags: ["GitHub"]);
         app.Services.AddTransient<IPackageStorageSynchronizer, GitRepositoryPackageSynchronizer>();
         app.Services.AddTransient<GitRepositoryService>();
 

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,7 +9,6 @@ using BaGetter.Core;
 using BaGetter.Git;
 using Microsoft.Extensions.Options;
 using Moq;
-using Octokit;
 using Xunit;
 
 namespace BaGetter.Tests;
@@ -22,7 +20,7 @@ public class GitRepositoryServiceTests
         [Fact]
         public async Task GetsStream()
         {
-            _client.Files["packages/test.nupkg"] = Content("packages/test.nupkg", "Hello world");
+            _client.Files["packages/test.nupkg"] = Content("Hello world");
 
             var result = await _target.GetAsync("test.nupkg");
 
@@ -52,14 +50,11 @@ public class GitRepositoryServiceTests
         [Fact]
         public async Task GetsDownloadUri()
         {
-            _client.Files["packages/test.nupkg"] = Content(
-                "packages/test.nupkg",
-                "Hello world",
-                "https://raw.githubusercontent.com/org/repo/main/packages/test.nupkg");
+            _client.Files["packages/test.nupkg"] = Content("Hello world");
 
             var result = await _target.GetDownloadUriAsync("test.nupkg");
 
-            Assert.Equal("https://raw.githubusercontent.com/org/repo/main/packages/test.nupkg", result.ToString());
+            Assert.Null(result);
         }
 
         [Fact]
@@ -82,15 +77,14 @@ public class GitRepositoryServiceTests
 
             Assert.Equal(StoragePutResult.Success, result);
             Assert.Equal("packages/test.nupkg", _client.CreatedPath);
-            Assert.Equal("main", _client.CreatedBranch);
             Assert.Equal("BaGetter storage: add packages/test.nupkg", _client.CreatedMessage);
-            Assert.Equal(Convert.ToBase64String(new byte[] { 0, 1, 2, 255 }), _client.CreatedContent);
+            Assert.Equal(new byte[] { 0, 1, 2, 255 }, _client.CreatedContent);
         }
 
         [Fact]
         public async Task ReturnsAlreadyExistsIfContentMatches()
         {
-            _client.Files["packages/test.nupkg"] = Content("packages/test.nupkg", new byte[] { 0, 1, 2, 255 });
+            _client.Files["packages/test.nupkg"] = Content(new byte[] { 0, 1, 2, 255 });
             using var content = BytesStream(0, 1, 2, 255);
 
             var result = await _target.PutAsync("test.nupkg", content, "application/octet-stream");
@@ -102,7 +96,7 @@ public class GitRepositoryServiceTests
         [Fact]
         public async Task ReturnsConflictIfContentDiffers()
         {
-            _client.Files["packages/test.nupkg"] = Content("packages/test.nupkg", "Hello world");
+            _client.Files["packages/test.nupkg"] = Content("Hello world");
             using var content = StringStream("Different content");
 
             var result = await _target.PutAsync("test.nupkg", content, "application/octet-stream");
@@ -137,14 +131,12 @@ public class GitRepositoryServiceTests
         [Fact]
         public async Task DeletesExistingFile()
         {
-            _client.Files["packages/test.nupkg"] = Content("packages/test.nupkg", "Hello world", sha: "abc123");
+            _client.Files["packages/test.nupkg"] = Content("Hello world");
 
             await _target.DeleteAsync("test.nupkg");
 
             Assert.Equal("packages/test.nupkg", _client.DeletedPath);
             Assert.Equal("BaGetter storage: delete packages/test.nupkg", _client.DeletedMessage);
-            Assert.Equal("abc123", _client.DeletedSha);
-            Assert.Equal("main", _client.DeletedBranch);
         }
     }
 
@@ -184,27 +176,14 @@ public class GitRepositoryServiceTests
             }
         }
 
-        protected static GitHubStorageContent Content(
-            string path,
-            string content,
-            string downloadUrl = null,
-            string sha = "sha")
+        protected static byte[] Content(string content)
         {
-            return Content(path, Encoding.UTF8.GetBytes(content), downloadUrl, sha);
+            return Encoding.UTF8.GetBytes(content);
         }
 
-        protected static GitHubStorageContent Content(
-            string path,
-            byte[] content,
-            string downloadUrl = null,
-            string sha = "sha")
+        protected static byte[] Content(byte[] content)
         {
-            return new GitHubStorageContent(
-                path,
-                sha,
-                Convert.ToBase64String(content),
-                "base64",
-                downloadUrl);
+            return content;
         }
 
         protected static Stream StringStream(string input)
@@ -224,78 +203,71 @@ public class GitRepositoryServiceTests
         }
     }
 
-    public class FakeGitHubStorageClient : IGitHubStorageClient
+    public class FakeGitHubStorageClient : IGitRepositoryClient
     {
-        public readonly Dictionary<string, GitHubStorageContent> Files = new(StringComparer.Ordinal);
+        public readonly Dictionary<string, byte[]> Files = new(StringComparer.Ordinal);
 
         public string CreatedPath { get; private set; }
 
         public string CreatedMessage { get; private set; }
 
-        public string CreatedContent { get; private set; }
-
-        public string CreatedBranch { get; private set; }
+        public byte[] CreatedContent { get; private set; }
 
         public string DeletedPath { get; private set; }
 
         public string DeletedMessage { get; private set; }
 
-        public string DeletedSha { get; private set; }
-
-        public string DeletedBranch { get; private set; }
-
-        public Task<string> GetLatestCommitShaAsync(
-            string branch,
-            CancellationToken cancellationToken)
+        public Task<string> UpdateAsync(CancellationToken cancellationToken)
         {
             return Task.FromResult("sha");
         }
 
-        public Task<IReadOnlyList<string>> GetRepositoryFilesAsync(
-            string branch,
-            CancellationToken cancellationToken)
+        public Task<IReadOnlyList<string>> GetRepositoryFilesAsync(CancellationToken cancellationToken)
         {
             return Task.FromResult((IReadOnlyList<string>)Files.Keys.ToList());
         }
 
-        public Task<GitHubStorageContent> GetFileAsync(
+        public Task<byte[]> GetFileAsync(
             string path,
-            string branch,
             CancellationToken cancellationToken)
         {
             if (!Files.TryGetValue(path, out var content))
             {
-                throw new NotFoundException("Not Found", HttpStatusCode.NotFound);
+                return Task.FromResult<byte[]>(null);
             }
 
             return Task.FromResult(content);
         }
 
-        public Task CreateFileAsync(
+        public Task<StoragePutResult> PutFileAsync(
             string path,
+            byte[] content,
             string message,
-            string content,
-            string branch,
             CancellationToken cancellationToken)
         {
+            if (Files.TryGetValue(path, out var existing))
+            {
+                return Task.FromResult(existing.SequenceEqual(content)
+                    ? StoragePutResult.AlreadyExists
+                    : StoragePutResult.Conflict);
+            }
+
             CreatedPath = path;
             CreatedMessage = message;
             CreatedContent = content;
-            CreatedBranch = branch;
-            return Task.CompletedTask;
+            return Task.FromResult(StoragePutResult.Success);
         }
 
         public Task DeleteFileAsync(
             string path,
             string message,
-            string sha,
-            string branch,
             CancellationToken cancellationToken)
         {
-            DeletedPath = path;
-            DeletedMessage = message;
-            DeletedSha = sha;
-            DeletedBranch = branch;
+            if (Files.ContainsKey(path))
+            {
+                DeletedPath = path;
+                DeletedMessage = message;
+            }
             return Task.CompletedTask;
         }
     }
