@@ -41,6 +41,10 @@ inputs:
     description: 'Docker network used to connect the runner container to BaGetter'
     required: false
     default: 'bagetter-action'
+  runner-container:
+    description: 'Optional Docker container name or ID for the GitHub Actions runner. Auto-detected from the container hostname when empty'
+    required: false
+    default: ''
 outputs:
   source-url:
     description: 'NuGet V3 source URL'
@@ -53,25 +57,94 @@ runs:
   steps:
   - id: start
     shell: bash
+    env:
+      RUNNER_CONTAINER_INPUT: ${{ inputs.runner-container }}
     run: |
       set -euo pipefail
 
       IMAGE_NAME="${{ inputs.image-name }}"
       CONTAINER_NAME="${{ inputs.container-name }}"
       NETWORK_NAME="${{ inputs.network-name }}"
-      RUNNER_CONTAINER="$(hostname)"
-      SOURCE_URL="http://${CONTAINER_NAME}:8080/v3/index.json"
-      READINESS_URL="http://${CONTAINER_NAME}:8080/health"
+      RUNNER_CONTAINER="$RUNNER_CONTAINER_INPUT"
+      RUNNER_HOSTNAME="$(hostname)"
+
+      if [ -z "$RUNNER_CONTAINER" ]; then
+        mapfile -t RUNNER_CANDIDATES < <(
+          docker ps -q |
+            while read -r candidate; do
+              if [ "$(docker inspect -f '{{.Config.Hostname}}' "$candidate")" = "$RUNNER_HOSTNAME" ]; then
+                printf '%s\n' "$candidate"
+              fi
+            done
+        )
+
+        if [ "${#RUNNER_CANDIDATES[@]}" -eq 1 ]; then
+          RUNNER_CONTAINER="${RUNNER_CANDIDATES[0]}"
+        elif [ "${#RUNNER_CANDIDATES[@]}" -gt 1 ]; then
+          echo "::error::Multiple Docker containers use the runner hostname '$RUNNER_HOSTNAME'. Set the runner-container input explicitly."
+          exit 1
+        fi
+      fi
+
+      if [ -z "$RUNNER_CONTAINER" ]; then
+        echo "::error::Unable to identify the Docker container running the GitHub Actions runner. Set the runner-container input to its Docker name or ID."
+        exit 1
+      fi
+
+      if [ "$(docker inspect -f '{{.State.Running}}' "$RUNNER_CONTAINER" 2> /dev/null || echo false)" != "true" ]; then
+        echo "::error::The runner container '$RUNNER_CONTAINER' does not exist or is not running."
+        exit 1
+      fi
+
+      RUNNER_NETWORK_MODE="$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$RUNNER_CONTAINER")"
+      SOURCE_HOST="$CONTAINER_NAME"
+      SERVER_NETWORK_ARGS=(--network "$NETWORK_NAME")
+      echo "Using runner container '$RUNNER_CONTAINER' with Docker network mode '$RUNNER_NETWORK_MODE'"
 
       docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1 || true
-      docker network create "$NETWORK_NAME" > /dev/null 2>&1 || true
-      docker network connect "$NETWORK_NAME" "$RUNNER_CONTAINER" > /dev/null 2>&1 || true
+
+      if [ "$RUNNER_NETWORK_MODE" = "host" ]; then
+        # Both containers use the host namespace, so BaGetter is reachable from
+        # the runner through its own loopback interface.
+        SOURCE_HOST="127.0.0.1"
+        SERVER_NETWORK_ARGS=(--network host)
+      elif [[ "$RUNNER_NETWORK_MODE" == container:* ]]; then
+        # A container sharing another network namespace cannot be connected to
+        # an additional bridge. Run BaGetter in the runner's namespace instead.
+        SOURCE_HOST="127.0.0.1"
+        SERVER_NETWORK_ARGS=(--network "container:$RUNNER_CONTAINER")
+      else
+        if ! docker network inspect "$NETWORK_NAME" > /dev/null 2>&1; then
+          docker network create "$NETWORK_NAME" > /dev/null
+        fi
+
+        runner_is_connected() {
+          docker inspect -f '{{range $network, $_ := .NetworkSettings.Networks}}{{println $network}}{{end}}' "$RUNNER_CONTAINER" |
+            grep -Fxq "$NETWORK_NAME"
+        }
+
+        if ! runner_is_connected; then
+          if ! CONNECT_ERROR="$(docker network connect "$NETWORK_NAME" "$RUNNER_CONTAINER" 2>&1)"; then
+            echo "::error::Failed to connect runner container '$RUNNER_CONTAINER' to Docker network '$NETWORK_NAME'."
+            printf '%s\n' "$CONNECT_ERROR"
+            exit 1
+          fi
+        fi
+
+        if ! runner_is_connected; then
+          echo "::error::Runner container '$RUNNER_CONTAINER' is not attached to Docker network '$NETWORK_NAME'."
+          exit 1
+        fi
+      fi
+
+      SOURCE_URL="http://${SOURCE_HOST}:8080/v3/index.json"
+      READINESS_URL="http://${SOURCE_HOST}:8080/health"
 
       docker build -t "$IMAGE_NAME" -f "$GITHUB_ACTION_PATH/Dockerfile" "$GITHUB_ACTION_PATH"
 
       docker run -d \
         --name "$CONTAINER_NAME" \
-        --network "$NETWORK_NAME" \
+        "${SERVER_NETWORK_ARGS[@]}" \
         -e "ApiKey=${{ inputs.api-key }}" \
         -e "Database__Type=Sqlite" \
         -e "Database__ConnectionString=Data Source=/data/db/bagetter.db" \
