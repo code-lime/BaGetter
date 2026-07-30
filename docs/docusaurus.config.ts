@@ -4,7 +4,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'BaGetter',
-  tagline: 'Effortless .NET Core NuGet hosting',
+  tagline: 'Effortless .NET NuGet hosting',
   favicon: 'img/favicon.ico',
 
   // Set the production url of your site here

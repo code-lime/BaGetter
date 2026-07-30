@@ -41,3 +41,63 @@ jobs:
 
     - name: Test
       run: dotnet test --no-build --verbosity normal
+
+  docker-smoke:
+    name: Docker smoke test
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+    - uses: actions/checkout@v4.1.1
+
+    - name: Build Docker image
+      run: docker build --build-arg Version=0.0.0-ci --tag bagetter-ci:${{ github.sha }} .
+
+    - name: Start isolated BaGetter container
+      run: |
+        docker run --detach \
+          --name bagetter-smoke \
+          --network none \
+          --read-only \
+          --cap-drop ALL \
+          --security-opt no-new-privileges \
+          --tmpfs /data:rw,nosuid,nodev,size=64m \
+          --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+          --env ASPNETCORE_URLS=http://127.0.0.1:8080 \
+          --env Database__Type=Sqlite \
+          --env "Database__ConnectionString=Data Source=/data/bagetter.db" \
+          --env Storage__Type=FileSystem \
+          --env Storage__Path=/data \
+          --env Search__Type=Database \
+          --env Logging__File__Path=/tmp/bagetter.log \
+          bagetter-ci:${{ github.sha }}
+
+    - name: Verify health and NuGet service index
+      run: |
+        for attempt in $(seq 1 30); do
+          if docker exec bagetter-smoke \
+            curl --fail --silent --show-error http://127.0.0.1:8080/health > /dev/null; then
+            break
+          fi
+
+          if [ "$attempt" -eq 30 ]; then
+            docker logs bagetter-smoke
+            exit 1
+          fi
+
+          sleep 2
+        done
+
+        docker exec bagetter-smoke \
+          curl --fail --silent --show-error http://127.0.0.1:8080/v3/index.json > /dev/null
+
+    - name: Show container logs on failure
+      if: failure()
+      run: docker logs bagetter-smoke
+
+    - name: Remove smoke-test resources
+      if: always()
+      run: |
+        docker rm --force bagetter-smoke || true
+        docker image rm bagetter-ci:${{ github.sha }} || true

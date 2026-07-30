@@ -10,13 +10,13 @@ export const CenterImg = ({children, color}) => (
 
 # BaGetter
 
-BaGetter (pronounced "ba getter") is a lightweight NuGet and symbol server. It is [open source](https://github.com/bagetter/BaGetter), cross-platform, and cloud ready!
+BaGetter (pronounced "ba getter") is a lightweight NuGet and symbol server. It is [open source](https://github.com/bagetter/BaGetter) and targets .NET 10.
 
 <CenterImg>
   <img width="100%" src="https://user-images.githubusercontent.com/737941/50140219-d8409700-0258-11e9-94c9-dad24d2b48bb.png"/>
 </CenterImg>
 
-BaGetter supports Filesystem, GCP and AWS S3 buckets, and Azure Blob Storage for package storage, and MySQL, Sqlite, SqlServer and PostgreSQL as database. The current per-package size limit is ~8GB. It can be hosted on IIS, and is also available in a linux [docker image](https://hub.docker.com/r/bagetter/bagetter).
+BaGetter stores package metadata in SQLite. Packages can be stored in a GitHub repository, on the local filesystem, or with the null provider for disposable scenarios. The web host is cross-platform and available as a Linux [Docker image](https://hub.docker.com/r/bagetter/bagetter); Windows users can also run the WPF system-tray host. The current per-package size limit is approximately 8 GiB, while GitHub storage is limited to 100 MiB per file.
 
 ## Run BaGetter
 
@@ -24,10 +24,8 @@ You can run BaGetter on your preferred platform:
 
 - [On your computer](Installation/local.md)
 - [Docker](Installation/docker.md)
-- [Azure](Installation/azure.md)
-- [AWS](Installation/aws.md)
-- [Google Cloud](Installation/gcp.md)
-- [Alibaba Cloud (Aliyun)](Installation/aliyun.md)
+- [Behind Windows IIS](Installation/iis-proxy.md)
+- [As a composite GitHub Action](https://github.com/bagetter/BaGetter/blob/main/action.yml)
 
 ## BaGetter SDK
 

@@ -1,5 +1,7 @@
 # Run BaGetter on Docker
 
+The BaGetter image contains the .NET 10 ASP.NET Core runtime. The example below uses SQLite metadata and filesystem package storage.
+
 ## Configure BaGetter (optional)
 
 Create a file named `bagetter.env` to store BaGetter's configurations:
@@ -22,11 +24,11 @@ For a full list of configurations, please refer to [BaGetter's configuration](..
 
 The `bagetter.env` file stores [BaGetter's configuration](../configuration) as environment variables.
 Alternatively, the configuration can be injected via environment variables directly, e.g. the `environment` array in a docker compose file or the `--env` flag in a `docker run` command.
-To learn how these configurations work, please refer to [ASP.NET Core's configuration documentation](https://docs.microsoft.com/en-us/aspnet/core/fundamentals/configuration/?view=aspnetcore-2.1&tabs=basicconfiguration#configuration-by-environment).
+To learn how these configurations work, please refer to [ASP.NET Core's configuration documentation](https://learn.microsoft.com/aspnet/core/fundamentals/configuration/#naming-of-environment-variables).
 
 :::
 
-If this step is omitted the default mode (unconfigured) will be Sqlite with the sql blobs stored in the path `/data/db/bagetter.db`.
+For GitHub repository storage, replace the `Storage__Type` and `Storage__Path` entries with the `Storage__Owner`, `Storage__Repository`, `Storage__Token`, and optional branch settings described in [Storage configuration](../configuration.md#storage-configuration).
 
 ## Run BaGetter
 
@@ -37,18 +39,10 @@ If this step is omitted the default mode (unconfigured) will be Sqlite with the 
 docker pull bagetter/bagetter
 ```
 
-You can now run BaGetter...
-
-- ...with optional `.env` file:
+Run BaGetter with the environment file:
 
 ```shell
 docker run --rm --name nuget-server -p 5000:8080 --env-file bagetter.env -v "$(pwd)/bagetter-data:/data" bagetter/bagetter:latest
-```
-
-- ...or without:
-
-```shell
-docker run --rm --name nuget-server -p 5000:8080 -v "$(pwd)/bagetter-data:/data" bagetter/bagetter:latest
 ```
 
 ## Publish packages
@@ -59,7 +53,7 @@ Publish your first package with:
 dotnet nuget push -s http://localhost:5000/v3/index.json -k NUGET-SERVER-API-KEY package.1.0.0.nupkg
 ```
 
-Publish your first [symbol package](https://docs.microsoft.com/en-us/nuget/create-packages/symbol-packages-snupkg) with:
+Publish your first [symbol package](https://learn.microsoft.com/nuget/create-packages/symbol-packages-snupkg) with:
 
 ```shell
 dotnet nuget push -s http://localhost:5000/v3/index.json -k NUGET-SERVER-API-KEY symbol.package.1.0.0.snupkg
@@ -84,8 +78,8 @@ You can restore packages by using the following package source:
 
 Some helpful guides:
 
-- [Visual Studio](https://docs.microsoft.com/en-us/nuget/consume-packages/install-use-packages-visual-studio#package-sources)
-- [NuGet.config](https://docs.microsoft.com/en-us/nuget/reference/nuget-config-file#package-source-sections)
+- [Visual Studio](https://learn.microsoft.com/nuget/consume-packages/install-use-packages-visual-studio#package-sources)
+- [NuGet.config](https://learn.microsoft.com/nuget/reference/nuget-config-file#package-source-sections)
 
 ## Symbol server
 
@@ -93,14 +87,14 @@ You can load symbols by using the following symbol location:
 
 `http://localhost:5000/api/download/symbols`
 
-For Visual Studio, please refer to the [Configure Debugging](https://docs.microsoft.com/en-us/visualstudio/debugger/specify-symbol-dot-pdb-and-source-files-in-the-visual-studio-debugger?view=vs-2017#configure-symbol-locations-and-loading-options) guide.
+For Visual Studio, please refer to the [Configure Debugging](https://learn.microsoft.com/visualstudio/debugger/specify-symbol-dot-pdb-and-source-files-in-the-visual-studio-debugger#configure-location-of-symbol-files-and-loading-options) guide.
 
 ## Running BaGetter behind a reverse proxy
 
-BaGetter can be run behind a reverse proxy in order to provide HTTPS, your own domain, and other features. For the API to deliver proper URLs, the proxy needs to forward the `X-Forwarded-Host` header, or the `Host` header iteslf.  
-For more information, please refer to the [ASP.NET Core documentation](https://docs.microsoft.com/en-us/aspnet/core/host-and-deploy/proxy-load-balancer).
+BaGetter can be run behind a reverse proxy in order to provide HTTPS, your own domain, and other features. For the API to deliver proper URLs, the proxy needs to forward the `X-Forwarded-Host` header, or the `Host` header itself.
+For more information, please refer to the [ASP.NET Core documentation](https://learn.microsoft.com/aspnet/core/host-and-deploy/proxy-load-balancer).
 
-Consider binding port 5000 to localhost only using -p 127.0.0.1:5000:8080 to avoid any transmission of non encrypted data even over internal networks
+Consider binding port 5000 to localhost only using `-p 127.0.0.1:5000:8080` to avoid unencrypted traffic over internal networks.
 
 ### Apache 2 Configuration
 ```config

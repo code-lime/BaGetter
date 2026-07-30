@@ -87,6 +87,16 @@ runs:
         "$IMAGE_NAME" \
         --urls "http://0.0.0.0:8080"
 
+      # BaGetter runs detached, so forward its startup and Git synchronization
+      # logs to the current GitHub Actions step while readiness is checked.
+      docker logs --follow "$CONTAINER_NAME" &
+      LOGS_PID=$!
+      stop_log_stream() {
+        kill "$LOGS_PID" > /dev/null 2>&1 || true
+        wait "$LOGS_PID" > /dev/null 2>&1 || true
+      }
+      trap stop_log_stream EXIT
+
       for attempt in $(seq 1 120); do
         if curl -fsS "$SOURCE_URL" > /dev/null 2>&1; then
           # The Git health check forces the initial clone/update before NuGet

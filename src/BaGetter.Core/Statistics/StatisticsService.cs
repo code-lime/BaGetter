@@ -40,18 +40,11 @@ public class StatisticsService : IStatisticsService
         var servicesNames = new List<string>();
 
         // Database providers.
-        if (configuration.HasDatabaseType("MySql")) servicesNames.Add("MySql");
-        if (configuration.HasDatabaseType("PostgreSql")) servicesNames.Add("PostgreSql");
-        if (configuration.HasDatabaseType("SqlServer")) servicesNames.Add("SqlServer");
         if (configuration.HasDatabaseType("Sqlite")) servicesNames.Add("Sqlite");
 
         // Storage providers.
         if (configuration.HasStorageType("FileSystem")) servicesNames.Add("FileSystem");
-        if (configuration.HasStorageType("AwsS3")) servicesNames.Add("AwsS3");
-        if (configuration.HasStorageType("AliyunOss")) servicesNames.Add("AliyunOss");
         if (configuration.HasStorageType("GitHub")) servicesNames.Add("GitHub");
-        if (configuration.HasStorageType("GoogleCloud")) servicesNames.Add("GoogleCloud");
-        if (configuration.HasStorageType("TencentCos")) servicesNames.Add("TencentCos");
         return servicesNames;
     }
 

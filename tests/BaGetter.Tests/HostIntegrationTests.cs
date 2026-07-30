@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using BaGetter.Core;
 using BaGetter.Database.Sqlite;
+using BaGetter.Git;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -12,6 +13,7 @@ public class HostIntegrationTests
 {
     private readonly string DatabaseTypeKey = "Database:Type";
     private readonly string ConnectionStringKey = "Database:ConnectionString";
+    private readonly string StorageTypeKey = "Storage:Type";
 
     [Fact]
     public void ThrowsIfDatabaseTypeInvalid()
@@ -57,6 +59,21 @@ public class HostIntegrationTests
         var context = provider.GetRequiredService<IContext>();
 
         Assert.IsType<SqliteContext>(context);
+    }
+
+    [Fact]
+    public void ReturnsGitRepositoryStorage()
+    {
+        var provider = BuildServiceProvider(new Dictionary<string, string>
+        {
+            { StorageTypeKey, "GitHub" },
+            { "Storage:Owner", "owner" },
+            { "Storage:Repository", "repository" },
+        });
+
+        var storage = provider.GetRequiredService<IStorageService>();
+
+        Assert.IsType<GitRepositoryService>(storage);
     }
 
     private IServiceProvider BuildServiceProvider(Dictionary<string, string> configs = null)

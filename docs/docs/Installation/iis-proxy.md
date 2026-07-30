@@ -4,7 +4,7 @@ With a few extra steps you can run BaGetter behind a Windows IIS proxy. This has
 
 ## IIS setup
 
-1. Install the [.NET 8 Runtime](https://dotnet.microsoft.com/download) on the web server.
+1. Install the [.NET 10 Hosting Bundle](https://dotnet.microsoft.com/download/dotnet/10.0) on the web server.
 2. Copy the BaGetter directory over to your hosting area such as `C:\Inetpub\wwwroot\BaGetter`
 3. Using IIS Manager, create a new Application Pool:
     - Name = `BaGetterAppPool` (can be whatever you want)
@@ -20,30 +20,30 @@ With a few extra steps you can run BaGetter behind a Windows IIS proxy. This has
 
 You **may** need to give special permissions to the top-level BaGetter folder so that the app can persist its state. This is necessary as the Application Pools' identity is a virtual account that isn't recognized by the Windows User Management Console. For more information, please refer to ASP.NET Core's documentation:
 
-- [Application Pools](https://docs.microsoft.com/en-us/aspnet/core/host-and-deploy/iis/?view=aspnetcore-2.2#application-pools)
-- [Application Pool Identity](https://docs.microsoft.com/en-us/aspnet/core/host-and-deploy/iis/?view=aspnetcore-2.2#application-pool-identity)
+- [Application Pools](https://learn.microsoft.com/aspnet/core/host-and-deploy/iis/#application-pools)
+- [Application Pool Identity](https://learn.microsoft.com/aspnet/core/host-and-deploy/iis/#application-pool-identity)
 
 ## Alternative storage path
 
 :::info
 
 Virtual Directories do not work with IIS and Kestrel.
-For more information, please refer to [ASP.NET Core's documentation](https://docs.microsoft.com/en-us/aspnet/core/host-and-deploy/iis/?view=aspnetcore-2.2#virtual-directories).
+For more information, please refer to [ASP.NET Core's documentation](https://learn.microsoft.com/aspnet/core/host-and-deploy/iis/#virtual-directories).
 
 :::
 
-Ensure that the configuration's storage `Path` has the appropriate forward slashes:
+Ensure that backslashes in the storage `Path` are escaped for JSON:
 
-```javascript
+```json
 ...
   "Storage": {
     "Type": "FileSystem",
-    "Path": "C://AnotherFolder/Packages"
+    "Path": "C:\\AnotherFolder\\Packages"
   },
 ...
 ```
 
-Note that you will need to adjust folder permissions if the `Path` is created outside of the BaGetter top-level directory. See the [BaGettert Folder Permissions](#bagetter-folder-permissions).
+Note that you will need to adjust folder permissions if the `Path` is created outside of the BaGetter top-level directory. See [BaGetter folder permissions](#bagetter-folder-permissions).
 
 ## IIS server options
 

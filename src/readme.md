@@ -4,21 +4,14 @@ These folders contain the core components of BaGetter:
 
 * `BaGetter` - The app's entry point that glues everything together.
 * `BaGetter.Core` - BaGetter's core logic and services.
-* `BaGetter.Web` - The [NuGet server APIs](https://docs.microsoft.com/en-us/nuget/api/overview) and web UI.
-* `BaGetter.Protocol` - Libraries to interact with [NuGet servers' APIs](https://docs.microsoft.com/en-us/nuget/api/overview).
+* `BaGetter.Web` - The [NuGet server APIs](https://learn.microsoft.com/nuget/api/overview) and web UI.
+* `BaGetter.WPF` - The Windows system-tray host for BaGetter.
+* `BaGetter.Protocol` - Libraries to interact with [NuGet servers' APIs](https://learn.microsoft.com/nuget/api/overview).
+* `BaGetter.Git` - The GitHub repository storage provider and synchronizer.
 
-These folders contain database-specific components of BaGetter:
+BaGetter stores package metadata in SQLite:
 
-* `BaGetter.Database.MySql` - BaGetter's MySQL database provider.
-* `BaGetter.Database.PostgreSql` - BaGetter's PostgreSql database provider.
 * `BaGetter.Database.Sqlite` - BaGetter's SQLite database provider.
-* `BaGetter.Database.SqlServer` - BaGetter's Microsoft SQL Server database provider.
 
-These folders contain cloud-specific components of BaGetter:
-
-* `BaGetter.Aliyun` - BaGetter's Alibaba Cloud(Aliyun) provider.
-* `BaGetter.Aws` - BaGetter's Amazon Web Services provider.
-* `BaGetter.Azure` - BaGetter's Azure provider.
-* `BaGetter.Gcp` - BaGetter's Google Cloud Platform provider.
-* `BaGetter.Tencent` - BaGetter's Tencent Cloud Platform provider.
+Filesystem and null storage implementations are part of `BaGetter.Core`.
 

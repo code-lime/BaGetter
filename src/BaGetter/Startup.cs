@@ -3,7 +3,6 @@ using BaGetter.Authentication;
 using BaGetter.Core;
 using BaGetter.Core.Extensions;
 using BaGetter.Git;
-using BaGetter.Tencent;
 using BaGetter.Web;
 using BaGetter.Web.Authentication;
 using Microsoft.AspNetCore.Authentication;
@@ -11,7 +10,6 @@ using Microsoft.AspNetCore.Authentication.OAuth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Razor.RuntimeCompilation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -45,8 +43,6 @@ public class Startup
         services.AddTransient(DependencyInjectionExtensions.GetServiceFromProviders<ISearchService>);
         services.AddTransient(DependencyInjectionExtensions.GetServiceFromProviders<ISearchIndexer>);
 
-        services.AddSingleton<IConfigureOptions<MvcRazorRuntimeCompilationOptions>, ConfigureRazorRuntimeCompilation>();
-
         services.AddHealthChecks();
 
         services.AddCors();
@@ -59,23 +55,11 @@ public class Startup
         app.AddNugetBasicHttpAuthorization();
 
         // Add database providers.
-        app.AddAzureTableDatabase();
-        app.AddMySqlDatabase();
-        app.AddPostgreSqlDatabase();
         app.AddSqliteDatabase();
-        app.AddSqlServerDatabase();
 
         // Add storage providers.
         app.AddFileStorage();
-        app.AddAliyunOssStorage();
-        app.AddAwsS3Storage();
-        app.AddAzureBlobStorage();
-        app.AddGoogleCloudStorage();
         app.AddGitRepository();
-        app.AddTencentOssStorage();
-
-        // Add search providers.
-        //app.AddAzureSearch();
     }
 
     // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.

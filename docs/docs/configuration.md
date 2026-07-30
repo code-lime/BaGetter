@@ -153,7 +153,7 @@ The following `Mirror` setting configures BaGetter to index packages from [nuget
 
 :::info
 
-`PackageSource` is the value of the [NuGet service index](https://docs.microsoft.com/nuget/api/service-index).
+`PackageSource` is the value of the [NuGet service index](https://learn.microsoft.com/nuget/api/service-index).
 
 :::
 
@@ -202,7 +202,7 @@ Packages deleted are always the oldest based on version numbers.
 
 ## Enable package overwrites
 
-Normally, BaGetter will reject a package upload if the id and version are already taken. This is to maintain the [immutability of semantically versioned packages](https://learn.microsoft.com/azure/devops/artifacts/artifacts-key-concepts?view=azure-devops#immutability).
+Normally, BaGetter will reject a package upload if the id and version are already taken. This preserves the immutability expected from [versioned NuGet packages](https://learn.microsoft.com/nuget/concepts/package-versioning).
 
 :::warning
 
@@ -283,17 +283,7 @@ dotnet nuget add source "http://localhost:5000/v3/index.json" --name "bagetter" 
 
 ## Database configuration
 
-BaGetter supports multiple database engines for storing package information:
-
-- MySQL: `MySql`
-- SQLite: `Sqlite`
-- SQL Server: `SqlServer`
-- PostgreSQL: `PostgreSql`
-- Azure Table Storage: `AzureTable`
-
-Each database engine requires a connection string to configure the connection. Please refer to [ConnectionStrings.com](https://www.connectionstrings.com/) to learn how to create the proper connection string for each database engine.
-
-You may configure the chosen database engine either using environment variables or by editing the `appsettings.json` file.
+BaGetter stores package metadata in SQLite. Configure it using environment variables or the `Database` section of `appsettings.json`.
 
 :::info
 
@@ -303,10 +293,10 @@ Database migrations are automatically applied on application startup.
 
 ### Environment Variables
 
-There are two environment variables related to database configuration. These are:
+The SQLite database settings are:
 
-- **Database__Type**: The database engine to use, this should be one of the strings from the above list such as `PostgreSql` or `Sqlite`.
-- **Database__ConnectionString**: The connection string for your database engine.
+- **Database__Type**: Must be `Sqlite`.
+- **Database__ConnectionString**: The SQLite connection string, for example `Data Source=bagetter.db`.
 
 ### `appsettings.json`
 
@@ -325,14 +315,76 @@ The database settings are located under the `Database` key in the `appsettings.j
 }
 ```
 
-There are two settings related to the database configuration:
+The corresponding settings are:
 
-- **Type**: The database engine to use, this should be one of the strings from the above list such as `PostgreSql` or `Sqlite`.
-- **ConnectionString**: The connection string for your database engine.
+- **Type**: Must be `Sqlite`.
+- **ConnectionString**: The SQLite connection string.
+
+## Storage configuration
+
+Select a package storage provider with `Storage:Type` in `appsettings.json` or `Storage__Type` in environment variables. Supported values are `GitHub`, `FileSystem`, and `Null`.
+
+### GitHub repository storage
+
+The `GitHub` provider clones a repository locally, stores package files in it, and commits and pushes changes back to the selected branch. Configure it as follows:
+
+```json
+{
+    "Storage": {
+        "Type": "GitHub",
+        "Owner": "your-organization",
+        "Repository": "your-package-storage",
+        "Token": "github-token",
+        "Branch": "main",
+        "RootPath": "packages",
+        "WorkPath": "work"
+    }
+}
+```
+
+- **Owner** and **Repository** identify the GitHub repository.
+- **Token** must have repository contents access sufficient to clone and push. Prefer `Storage__Token` or a mounted secret instead of committing it to `appsettings.json`.
+- **Branch** is optional; an empty value uses the repository's default branch.
+- **RootPath** optionally places all BaGetter files below a directory in the repository.
+- **WorkPath** is the local clone path. It must be writable and persistent for efficient synchronization.
+- **UpdateIntervalSeconds** controls how often BaGetter fetches external changes; the default is 30 seconds.
+
+GitHub rejects files larger than 100 MiB, so this provider cannot store an individual package or symbol file above that limit.
+
+### Filesystem storage
+
+Use `FileSystem` for a local directory or persistent container volume:
+
+```json
+{
+    "Storage": {
+        "Type": "FileSystem",
+        "Path": "packages"
+    }
+}
+```
+
+The process must have read and write permission for `Path`.
+
+### Null storage
+
+Set `Storage:Type` to `Null` only for disposable tests where stored package content is not expected to be downloaded later.
+
+## Search configuration
+
+Use `Database` to search the SQLite package metadata. `Null` disables search and autocomplete:
+
+```json
+{
+    "Search": {
+        "Type": "Database"
+    }
+}
+```
 
 ## IIS server options
 
-IIS Server options can be configured under the `IISServerOptions` key. The available options are detailed at [docs.microsoft.com](https://docs.microsoft.com/dotnet/api/microsoft.aspnetcore.builder.iisserveroptions)
+IIS Server options can be configured under the `IISServerOptions` key. The available options are detailed in the [ASP.NET Core API documentation](https://learn.microsoft.com/dotnet/api/microsoft.aspnetcore.builder.iisserveroptions).
 
 :::note
 
@@ -458,4 +510,4 @@ Aditional documentation for secrets:
 - [How to use secrets in Docker Compose](https://docs.docker.com/compose/use-secrets)
 - [Docker Swarm secrets](https://docs.docker.com/engine/swarm/secrets)
 - [Kubernetes secrets](https://kubernetes.io/docs/concepts/configuration/secret)
-- [ASP.NET Core Documentation](https://docs.microsoft.com/aspnet/core/fundamentals/configuration/#key-per-file-configuration-provider)
+- [ASP.NET Core Documentation](https://learn.microsoft.com/aspnet/core/fundamentals/configuration/#key-per-file-configuration-provider)
