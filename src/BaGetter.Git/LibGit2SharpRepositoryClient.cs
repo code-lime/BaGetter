@@ -18,16 +18,19 @@ public sealed class LibGit2SharpRepositoryClient : IGitRepositoryClient, IDispos
 {
     private readonly GitRepositoryOptions _options;
     private readonly ILogger<LibGit2SharpRepositoryClient> _logger;
+    private readonly IProgress<GitRepositoryProgress> _progress;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly string _workPath;
     private readonly string _repositoryUrl;
 
     public LibGit2SharpRepositoryClient(
         IOptions<GitRepositoryOptions> options,
-        ILogger<LibGit2SharpRepositoryClient> logger)
+        ILogger<LibGit2SharpRepositoryClient> logger,
+        IProgress<GitRepositoryProgress> progress)
     {
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _progress = progress ?? throw new ArgumentNullException(nameof(progress));
         var workPath = string.IsNullOrWhiteSpace(_options.WorkPath) ? "work" : _options.WorkPath;
         _workPath = Path.IsPathFullyQualified(workPath)
             ? Path.GetFullPath(workPath)
@@ -177,9 +180,12 @@ public sealed class LibGit2SharpRepositoryClient : IGitRepositoryClient, IDispos
             BranchName = string.IsNullOrWhiteSpace(_options.Branch) ? null : _options.Branch.Trim(),
         };
         clone.FetchOptions.CredentialsProvider = Credentials;
-        clone.FetchOptions.OnTransferProgress = CreateTransferProgressHandler("Git clone");
+        clone.FetchOptions.OnTransferProgress = CreateTransferProgressHandler(
+            "Git clone",
+            GitRepositoryProgressPhase.Cloning);
 
         _logger.LogInformation("Cloning {RepositoryUrl} into {WorkPath}", _repositoryUrl, _workPath);
+        _progress.Report(new GitRepositoryProgress(GitRepositoryProgressPhase.Cloning));
         var stopwatch = Stopwatch.StartNew();
         Repository.Clone(_repositoryUrl, _workPath, clone);
         _logger.LogInformation(
@@ -215,8 +221,11 @@ public sealed class LibGit2SharpRepositoryClient : IGitRepositoryClient, IDispos
         var fetchOptions = new FetchOptions
         {
             CredentialsProvider = Credentials,
-            OnTransferProgress = CreateTransferProgressHandler("Git fetch"),
+            OnTransferProgress = CreateTransferProgressHandler(
+                "Git fetch",
+                GitRepositoryProgressPhase.Fetching),
         };
+        _progress.Report(new GitRepositoryProgress(GitRepositoryProgressPhase.Fetching));
         var stopwatch = Stopwatch.StartNew();
         Commands.Fetch(
             repository,
@@ -238,7 +247,9 @@ public sealed class LibGit2SharpRepositoryClient : IGitRepositoryClient, IDispos
             stopwatch.Elapsed);
     }
 
-    private TransferProgressHandler CreateTransferProgressHandler(string operation)
+    private TransferProgressHandler CreateTransferProgressHandler(
+        string operation,
+        GitRepositoryProgressPhase phase)
     {
         var lastReportedPercent = -5;
         return progress =>
@@ -249,6 +260,12 @@ public sealed class LibGit2SharpRepositoryClient : IGitRepositoryClient, IDispos
             }
 
             var percent = (int)((long)progress.ReceivedObjects * 100 / progress.TotalObjects);
+            _progress.Report(new GitRepositoryProgress(
+                phase,
+                percent,
+                progress.ReceivedObjects,
+                progress.TotalObjects,
+                progress.ReceivedBytes));
 
             if (percent <= lastReportedPercent ||
                 (percent < 100 && percent < lastReportedPercent + 5))

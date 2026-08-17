@@ -28,6 +28,7 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
     private readonly IConfiguration _configuration;
     private readonly IOptionsSnapshot<GitRepositoryOptions> _options;
     private readonly ILogger<GitRepositoryPackageSynchronizer> _logger;
+    private readonly IProgress<GitRepositoryProgress> _progress;
 
     public GitRepositoryPackageSynchronizer(
         IGitRepositoryClient client,
@@ -37,7 +38,8 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
         SystemTime time,
         IConfiguration configuration,
         IOptionsSnapshot<GitRepositoryOptions> options,
-        ILogger<GitRepositoryPackageSynchronizer> logger)
+        ILogger<GitRepositoryPackageSynchronizer> logger,
+        IProgress<GitRepositoryProgress> progress)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _storage = storage ?? throw new ArgumentNullException(nameof(storage));
@@ -47,6 +49,32 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _progress = progress ?? throw new ArgumentNullException(nameof(progress));
+    }
+
+    public async Task InitializeAsync(CancellationToken cancellationToken)
+    {
+        if (!IsGitHubStorage())
+        {
+            return;
+        }
+
+        _progress.Report(new GitRepositoryProgress(GitRepositoryProgressPhase.Checking));
+        try
+        {
+            await EnsureRepositoryIsCurrentAsync(
+                indexAllPackages: true,
+                reportProgress: true,
+                cancellationToken);
+            _progress.Report(new GitRepositoryProgress(
+                GitRepositoryProgressPhase.Synchronized,
+                Percent: 100));
+        }
+        catch
+        {
+            _progress.Report(new GitRepositoryProgress(GitRepositoryProgressPhase.Failed));
+            throw;
+        }
     }
 
     public async Task<bool> TrySyncAsync(CancellationToken cancellationToken)
@@ -58,11 +86,15 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
 
         try
         {
-            await EnsureRepositoryIsCurrentAsync(indexAllPackages: true, cancellationToken);
+            await EnsureRepositoryIsCurrentAsync(
+                indexAllPackages: true,
+                reportProgress: false,
+                cancellationToken);
             return true;
         }
         catch (Exception e)
         {
+            _progress.Report(new GitRepositoryProgress(GitRepositoryProgressPhase.Failed));
             _logger.LogError(e, "Failed to synchronize packages from GitHub repository");
             return false;
         }
@@ -79,13 +111,17 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
 
         try
         {
-            var state = await EnsureRepositoryIsCurrentAsync(indexAllPackages: false, cancellationToken);
+            var state = await EnsureRepositoryIsCurrentAsync(
+                indexAllPackages: false,
+                reportProgress: false,
+                cancellationToken);
             await RemoveMissingVersionsAsync(id, state, cancellationToken);
 
             await IndexPackageFilesAsync(
                 state.PackageFiles.Values.Where(
                     package => string.Equals(package.Id, id, StringComparison.OrdinalIgnoreCase)),
                 $"package {id}",
+                reportProgress: false,
                 cancellationToken);
 
             return true;
@@ -107,7 +143,10 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
             return false;
         }
 
-        await EnsureRepositoryIsCurrentAsync(indexAllPackages: false, cancellationToken);
+        await EnsureRepositoryIsCurrentAsync(
+            indexAllPackages: false,
+            reportProgress: false,
+            cancellationToken);
 
         var packagePath = PackagePath(id, version);
 
@@ -138,6 +177,7 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
 
     private async Task<RepositorySyncState> EnsureRepositoryIsCurrentAsync(
         bool indexAllPackages,
+        bool reportProgress,
         CancellationToken cancellationToken)
     {
         var options = _options.Value;
@@ -181,6 +221,7 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
                 await IndexPackageFilesAsync(
                     state.PackageFiles.Values,
                     "all packages",
+                    reportProgress,
                     cancellationToken);
 
                 state.FullyIndexedCommitSha = state.LastCommitSha;
@@ -290,9 +331,18 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
     private async Task IndexPackageFilesAsync(
         IEnumerable<PackageFile> packageFiles,
         string scope,
+        bool reportProgress,
         CancellationToken cancellationToken)
     {
         var files = packageFiles.ToList();
+        if (reportProgress)
+        {
+            _progress.Report(new GitRepositoryProgress(
+                GitRepositoryProgressPhase.Indexing,
+                files.Count == 0 ? 100 : 0,
+                Total: files.Count));
+        }
+
         if (files.Count == 0)
         {
             _logger.LogDebug("No package files to synchronize for {SyncScope}", scope);
@@ -312,6 +362,15 @@ public class GitRepositoryPackageSynchronizer : IPackageStorageSynchronizer
             await IndexPackagePathAsync(files[index].StoragePath, cancellationToken);
 
             var completed = index + 1;
+            if (reportProgress)
+            {
+                _progress.Report(new GitRepositoryProgress(
+                    GitRepositoryProgressPhase.Indexing,
+                    completed * 100 / files.Count,
+                    completed,
+                    files.Count));
+            }
+
             if (completed == files.Count || completed % reportEvery == 0)
             {
                 _logger.LogInformation(

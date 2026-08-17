@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 using BaGetter.Core;
+using BaGetter.Git;
 using BaGetter.Web;
 using McMaster.Extensions.CommandLineUtils;
 using Microsoft.AspNetCore.Hosting;
@@ -11,6 +12,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.EventLog;
 using Serilog;
+using Serilog.Events;
 
 namespace BaGetter;
 
@@ -19,8 +21,16 @@ public class Program
     public static async Task Main(string[] args)
     {
         using var host = CreateHostBuilder(args).Build();
+        await RunAsync(host, args);
+    }
+
+    public static async Task RunAsync(IHost host, string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        ArgumentNullException.ThrowIfNull(args);
+
         var logger = host.Services.GetRequiredService<ILogger<Program>>();
-        logger.LogInformation("BaGetter host started from {BaseDirectory}", AppContext.BaseDirectory);
+        logger.LogInformation("BaGetter host initializing from {BaseDirectory}", AppContext.BaseDirectory);
 
         if (!host.ValidateStartupOptions())
         {
@@ -54,6 +64,13 @@ public class Program
         app.OnExecuteAsync(async cancellationToken =>
         {
             await host.RunMigrationsAsync(cancellationToken);
+
+            using (var scope = host.Services.CreateScope())
+            {
+                var synchronizer = scope.ServiceProvider.GetRequiredService<GitRepositoryPackageSynchronizer>();
+                await synchronizer.InitializeAsync(cancellationToken);
+            }
+
             await host.RunAsync(cancellationToken);
         });
 
@@ -100,7 +117,9 @@ public class Program
                 Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
 
                 var fileLogger = new LoggerConfiguration()
-                    .MinimumLevel.Verbose()
+                    .MinimumLevel.Information()
+                    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+                    .MinimumLevel.Override("Microsoft.Hosting.Lifetime", LogEventLevel.Information)
                     .Enrich.FromLogContext()
                     .WriteTo.File(
                         logPath,

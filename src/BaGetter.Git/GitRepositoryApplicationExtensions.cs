@@ -11,6 +11,9 @@ public static class GitRepositoryApplicationExtensions
     public static BaGetterApplication AddGitRepository(this BaGetterApplication app)
     {
         app.Services.AddBaGetterOptions<GitRepositoryOptions>(nameof(BaGetterOptions.Storage));
+        app.Services.AddSingleton<GitRepositoryStatus>();
+        app.Services.AddSingleton<IProgress<GitRepositoryProgress>>(provider =>
+            provider.GetRequiredService<GitRepositoryStatus>());
         app.Services.AddSingleton<IGitRepositoryClient, LibGit2SharpRepositoryClient>();
         app.Services.AddHealthChecks()
             .AddCheck<GitRepositoryHealthCheck>("GitHub", tags: ["GitHub"]);
