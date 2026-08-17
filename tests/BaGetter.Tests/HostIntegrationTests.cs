@@ -93,6 +93,28 @@ public class HostIntegrationTests
         Assert.IsType<GitRepositoryService>(storage);
     }
 
+    [Fact]
+    public void ReturnsGitRepositoryPackageSynchronizer()
+    {
+        using var host = Program
+            .CreateHostBuilder(Array.Empty<string>())
+            .ConfigureAppConfiguration((ctx, config) =>
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string>
+                {
+                    { StorageTypeKey, "GitHub" },
+                    { "Storage:Owner", "owner" },
+                    { "Storage:Repository", "repository" },
+                });
+            })
+            .Build();
+        using var scope = host.Services.CreateScope();
+
+        var synchronizer = scope.ServiceProvider.GetRequiredService<GitRepositoryPackageSynchronizer>();
+
+        Assert.NotNull(synchronizer);
+    }
+
     private IServiceProvider BuildServiceProvider(Dictionary<string, string> configs = null)
     {
         var host = Program

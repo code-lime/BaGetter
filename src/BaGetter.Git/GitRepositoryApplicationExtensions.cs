@@ -17,6 +17,7 @@ public static class GitRepositoryApplicationExtensions
         app.Services.AddSingleton<IGitRepositoryClient, LibGit2SharpRepositoryClient>();
         app.Services.AddHealthChecks()
             .AddCheck<GitRepositoryHealthCheck>("GitHub", tags: ["GitHub"]);
+        app.Services.AddTransient<GitRepositoryPackageSynchronizer>();
         app.Services.AddTransient<IPackageStorageSynchronizer, GitRepositoryPackageSynchronizer>();
         app.Services.AddTransient<GitRepositoryService>();
 
