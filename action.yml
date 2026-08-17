@@ -59,8 +59,15 @@ runs:
     shell: bash
     env:
       RUNNER_CONTAINER_INPUT: ${{ inputs.runner-container }}
+      STORAGE_TOKEN: ${{ inputs.token }}
     run: |
       set -euo pipefail
+
+      if [ -z "${STORAGE_TOKEN//[[:space:]]/}" ]; then
+        echo "::error::The token input is required and cannot be empty."
+        exit 1
+      fi
+      export Storage__Token="$STORAGE_TOKEN"
 
       IMAGE_NAME="${{ inputs.image-name }}"
       CONTAINER_NAME="${{ inputs.container-name }}"
@@ -152,7 +159,7 @@ runs:
         -e "Storage__Type=GitHub" \
         -e "Storage__Owner=${{ inputs.owner }}" \
         -e "Storage__Repository=${{ inputs.repository }}" \
-        -e "Storage__Token=${{ inputs.token }}" \
+        -e Storage__Token \
         -e "Storage__Branch=${{ inputs.branch }}" \
         -e "Storage__RootPath=${{ inputs.root-path }}" \
         -e "Storage__WorkPath=/data/work" \

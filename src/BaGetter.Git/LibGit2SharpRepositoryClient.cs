@@ -285,14 +285,42 @@ public sealed class LibGit2SharpRepositoryClient : IGitRepositoryClient, IDispos
         };
     }
 
-    private Credentials Credentials(string _, string __, SupportedCredentialTypes ___) =>
-        string.IsNullOrWhiteSpace(_options.Token)
-            ? new DefaultCredentials()
-            : new UsernamePasswordCredentials
+    private Credentials Credentials(
+        string _,
+        string usernameFromUrl,
+        SupportedCredentialTypes supportedCredentialTypes)
+    {
+        if (!string.IsNullOrWhiteSpace(_options.Token) &&
+            supportedCredentialTypes.HasFlag(SupportedCredentialTypes.UsernamePassword))
+        {
+            var username = usernameFromUrl;
+            if (string.IsNullOrWhiteSpace(username))
             {
-                Username = string.IsNullOrWhiteSpace(_options.Username) ? "git" : _options.Username,
+                username = string.IsNullOrWhiteSpace(_options.Username) ? "x-access-token" : _options.Username;
+            }
+
+            return new UsernamePasswordCredentials
+            {
+                Username = username,
                 Password = _options.Token,
             };
+        }
+
+        if (supportedCredentialTypes.HasFlag(SupportedCredentialTypes.Default))
+        {
+            return new DefaultCredentials();
+        }
+
+        if (string.IsNullOrWhiteSpace(_options.Token) &&
+            supportedCredentialTypes.HasFlag(SupportedCredentialTypes.UsernamePassword))
+        {
+            throw new InvalidOperationException(
+                "The Git remote requires username/password credentials, but no token is configured");
+        }
+
+        throw new InvalidOperationException(
+            $"The Git remote does not support a configured credential mechanism ({supportedCredentialTypes})");
+    }
 
     private string GetFullPath(string path)
     {

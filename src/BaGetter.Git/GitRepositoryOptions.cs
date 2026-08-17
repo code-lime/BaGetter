@@ -23,7 +23,7 @@ public class GitRepositoryOptions : StorageOptions
 
     public int UpdateIntervalSeconds { get; set; } = 30;
 
-    public string Username { get; set; } = "git";
+    public string Username { get; set; } = "x-access-token";
 
     public string AuthorName { get; set; } = "BaGetter";
 
